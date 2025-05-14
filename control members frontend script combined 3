@@ -1,0 +1,5153 @@
+/* THIS IS THE ID AND NAME (210) xx Part 6 of X: My Items Page for Sellers, Profile Fields for Seller Association, Featured Toggle, Pricing Rules, and Final Surcharge Page */
+// ================================
+// M8: 我的物品 (seller)           
+
+function M_xwz_my_tickets_page() {
+    global $wpdb;
+    $master_products_table = $wpdb->prefix.'master_products';
+    $supplier_stock_table = $wpdb->prefix.'supplier_stock';
+
+    $user_id = get_current_user_id();
+    $seller_id = get_user_meta($user_id,'xwz_seller_id',true);
+    $seller_id = intval($seller_id);
+
+    if($seller_id <=0) {
+        echo '<div class="notice notice-error"><p>您的账号未关联到任何供应商。</p></div>';
+        return;
+    }
+
+    $total = $wpdb->get_var("SELECT COUNT(*) FROM $master_products_table");
+    list($paged,$offset,$total_pages)=M_xwz_get_pagination($total,100);
+
+    $products = $wpdb->get_results($wpdb->prepare("
+        SELECT m.*, s.quantity, s.supplier_price, s.is_visible,
+               s.recommended_retail_price, s.list_price, s.partner_price,
+               s.public_remark, s.private_remark, s.id AS stock_id, s.sku as stock_sku, s.partner_same_as_list
+        FROM $master_products_table m
+        LEFT JOIN $supplier_stock_table s ON (s.sku=m.sku AND s.seller_id=%d)
+        ORDER BY m.sku ASC, m.product_title ASC
+        LIMIT %d OFFSET %d
+    ", $seller_id,100,$offset));
+
+    echo '<div class="wrap"><h1>M8_我的物品</h1>';
+    echo '<table class="widefat striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>SKU</th>
+                    <th>标题</th>
+                    <th>分类</th>
+                    <th>品牌</th>
+                    <th>主图</th>
+                    <th>多图</th>
+                    <th>RRP</th>
+                    <th>Partner=List?</th>
+                    <th>List 价</th>
+                    <th>Partner价</th>
+                    <th>公共备注</th>
+                    <th>私有备注</th>
+                    <th>数量</th>
+                    <th>供应商价</th>
+                    <th>可见</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>';
+
+    if($products){
+        foreach($products as $p){
+            $stock_id = isset($p->stock_id)?$p->stock_id:0;
+            $quantity = isset($p->quantity)?$p->quantity:0;
+            $supplier_price = isset($p->supplier_price)?$p->supplier_price:0.00;
+            $is_visible = isset($p->is_visible)?$p->is_visible:0;
+            $rrp = isset($p->recommended_retail_price)?$p->recommended_retail_price:0.00;
+            $lprice=isset($p->list_price)?$p->list_price:0.00;
+            $pp=isset($p->partner_price)?$p->partner_price:0.00;
+            $pub=isset($p->public_remark)?$p->public_remark:'';
+            $priv=isset($p->private_remark)?$p->private_remark:'';
+            $psl=$p->partner_same_as_list?1:0;
+
+            echo '<tr>
+                    <form method="post" action="'.esc_url(admin_url('admin-post.php')).'">
+                        '.wp_nonce_field('xwz_update_supplier_stock','xwz_supplier_stock_nonce',false,false).'
+                        <input type="hidden" name="action" value="xwz_update_supplier_stock">
+                        <input type="hidden" name="stock_id" value="'.esc_attr($stock_id).'">
+                        <input type="hidden" name="sku" value="'.esc_attr($p->sku).'">
+                        <input type="hidden" name="seller_id" value="'.esc_attr($seller_id).'">
+                        <td>'.intval($p->id).'</td>
+                        <td>'.esc_html($p->sku).'</td>
+                        <td>'.esc_html($p->product_title).'</td>
+                        <td>'.esc_html($p->product_category).'</td>
+                        <td>'.esc_html($p->brand).'</td>
+                        <td>'.esc_html($p->main_photo).'</td>
+                        <td>'.esc_html($p->multiple_photos).'</td>
+                        <td><input type="number" step="0.01" name="recommended_retail_price" value="'.esc_attr($rrp).'"></td>
+                        <td><input type="checkbox" name="partner_same_as_list" '.checked($psl,1,false).'></td>
+                        <td><input type="number" step="0.01" name="list_price" value="'.esc_attr($lprice).'" '.($psl?'disabled':'').'></td>
+                        <td><input type="number" step="0.01" name="partner_price" value="'.esc_attr($pp).'"></td>
+                        <td><input type="text" name="public_remark" value="'.esc_attr($pub).'"></td>
+                        <td><input type="text" name="private_remark" value="'.esc_attr($priv).'"></td>
+                        <td><input type="number" name="quantity" value="'.esc_attr($quantity).'" min="0"></td>
+                        <td><input type="number" step="0.01" name="supplier_price" value="'.esc_attr($supplier_price).'" min="0"></td>
+                        <td><input type="checkbox" name="is_visible" '.checked($is_visible,1,false).'></td>
+                        <td><input type="submit" class="button button-primary" name="update_supplier_stock_row" value="保存"></td>
+                    </form>
+                  </tr>';
+        }
+    } else {
+        echo '<tr><td colspan="17">暂无物品。</td></tr>';
+    }
+    echo '</tbody></table>';
+
+    M_xwz_print_pagination_links($paged,$total_pages);
+    echo '</div>';
+}
+
+add_action('admin_post_xwz_update_supplier_stock', 'M_xwz_handle_update_supplier_stock_new');
+function M_xwz_handle_update_supplier_stock_new() {
+    global $wpdb;
+    $supplier_stock_table = $wpdb->prefix.'supplier_stock';
+
+    if(!isset($_POST['xwz_supplier_stock_nonce']) || !wp_verify_nonce($_POST['xwz_supplier_stock_nonce'],'xwz_update_supplier_stock')){
+        wp_die('安全检查失败');
+    }
+
+    $stock_id = isset($_POST['stock_id'])?intval($_POST['stock_id']):0;
+    $seller_id = isset($_POST['seller_id'])?intval($_POST['seller_id']):0;
+    $sku = sanitize_text_field($_POST['sku']);
+    $quantity = isset($_POST['quantity'])?intval($_POST['quantity']):0;
+    $supplier_price = isset($_POST['supplier_price'])?floatval($_POST['supplier_price']):0.00;
+    $is_visible = isset($_POST['is_visible'])?1:0;
+    $rrp = isset($_POST['recommended_retail_price'])?floatval($_POST['recommended_retail_price']):0.00;
+    $lprice = isset($_POST['list_price'])?floatval($_POST['list_price']):0.00;
+    $pp = isset($_POST['partner_price'])?floatval($_POST['partner_price']):0.00;
+    $public_remark = isset($_POST['public_remark'])?sanitize_text_field($_POST['public_remark']):'';
+    $private_remark = isset($_POST['private_remark'])?sanitize_text_field($_POST['private_remark']):'';
+    $partner_same_as_list = isset($_POST['partner_same_as_list'])?1:0;
+    if($partner_same_as_list==1){
+        $lprice=$pp;
+    }
+
+    if($stock_id > 0) {
+        $wpdb->update($supplier_stock_table,[
+            'quantity'=>$quantity,
+            'supplier_price'=>$supplier_price,
+            'recommended_retail_price'=>$rrp,
+            'list_price'=>$lprice,
+            'partner_price'=>$pp,
+            'public_remark'=>$public_remark,
+            'private_remark'=>$private_remark,
+            'is_visible'=>$is_visible,
+            'partner_same_as_list'=>$partner_same_as_list,
+            'updated_at'=>current_time('mysql')
+        ],['id'=>$stock_id,'seller_id'=>$seller_id]);
+    } else {
+        $wpdb->insert($supplier_stock_table,[
+            'seller_id'=>$seller_id,
+            'sku'=>$sku,
+            'quantity'=>$quantity,
+            'supplier_price'=>$supplier_price,
+            'recommended_retail_price'=>$rrp,
+            'list_price'=>$lprice,
+            'partner_price'=>$pp,
+            'public_remark'=>$public_remark,
+            'private_remark'=>$private_remark,
+            'is_visible'=>$is_visible,
+            'partner_same_as_list'=>$partner_same_as_list,
+            'updated_at'=>current_time('mysql')
+        ]);
+    }
+
+    M_xwz_update_on_sale_for_sku_new($sku);
+
+    $redirect_url = add_query_arg(['page'=>'M_xwz_supplier_stock','updated'=>'1'],admin_url('admin.php'));
+    wp_redirect($redirect_url);
+    exit;
+}
+
+add_action('show_user_profile','M_xwz_show_extra_profile_fields_new');
+add_action('edit_user_profile','M_xwz_show_extra_profile_fields_new');
+function M_xwz_show_extra_profile_fields_new($user) {
+    if(!current_user_can('manage_options')){
+        return;
+    }
+    global $wpdb;
+    $sellers_table=$wpdb->prefix.'sellers';
+    $seller_id=get_user_meta($user->ID,'xwz_seller_id',true);
+    echo '<h3>供应商信息</h3>
+    <table class="form-table">
+        <tr><th><label for="xwz_seller_id">已分配供应商</label></th>
+        <td><select name="xwz_seller_id" id="xwz_seller_id"><option value="">无</option>';
+    $sellers=$wpdb->get_results("SELECT * FROM $sellers_table ORDER BY seller_name ASC");
+    foreach ($sellers as $s) {
+        echo '<option value="'.intval($s->id).'" '.selected($s->id,$seller_id,false).'>'.esc_html($s->seller_name).'</option>';
+    }
+    echo '</select><br><span class="description">为此用户分配一个供应商。</span></td></tr>
+    </table>';
+}
+
+add_action('personal_options_update','M_xwz_save_extra_profile_fields_new');
+add_action('edit_user_profile_update','M_xwz_save_extra_profile_fields_new');
+function M_xwz_save_extra_profile_fields_new($user_id) {
+    if(!current_user_can('manage_options')) return false;
+    if(isset($_POST['xwz_seller_id'])){
+        $seller_id=intval($_POST['xwz_seller_id']);
+        update_user_meta($user_id,'xwz_seller_id',$seller_id);
+    }
+}
+
+// ================================
+// M9_切换推荐 (Part 6) UPDATED
+// Added Seller ID field control
+// ================================
+// In M_xwz_featured_toggle_page():
+function M_xwz_featured_toggle_page() {
+    global $wpdb;
+    $supplier_stock_table=$wpdb->prefix.'supplier_stock';
+    if($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['sku'],$_POST['is_featured'])){
+        $sku=sanitize_text_field($_POST['sku']);
+        $is_featured=intval($_POST['is_featured']);
+        $seller_id = isset($_POST['seller_id']) ? intval($_POST['seller_id']) : 0;
+
+        if($seller_id>0){
+            $wpdb->update($supplier_stock_table,['is_featured'=>0],['sku'=>$sku,'seller_id'=>$seller_id]);
+            if($is_featured==1){
+                $wpdb->update($supplier_stock_table,['is_featured'=>1],['sku'=>$sku,'seller_id'=>$seller_id]);
+            }
+        } else {
+            $wpdb->update($supplier_stock_table,['is_featured'=>0],['sku'=>$sku]);
+            if($is_featured==1){
+                $wpdb->update($supplier_stock_table,['is_featured'=>1],['sku'=>$sku]);
+            }
+        }
+
+        echo '<div class="notice notice-success"><p>已更新推荐状态。SKU '.$sku.'</p></div>';
+    }
+
+    echo '<div class="wrap"><h1>M9_切换推荐</h1>
+          <form method="post">
+          <table class="form-table">
+            <tr><th>SKU</th><td><input type="text" name="sku" required></td></tr>
+            <tr><th>是否推荐</th><td><select name="is_featured"><option value="0">否</option><option value="1">是</option></select></td></tr>
+            <tr><th>卖家ID (0=全部)</th><td><input type="number" name="seller_id" value="0"></td></tr>
+          </table>
+          <input type="submit" class="button button-primary" value="更新推荐">
+          </form>';
+
+    // Show currently featured products:
+    $featured = $wpdb->get_results("SELECT s.*, m.product_title, m.sku as master_sku FROM $supplier_stock_table s INNER JOIN {$wpdb->prefix}master_products m ON s.sku = m.sku WHERE s.is_featured=1");
+    if($featured) {
+        echo '<h2>当前已推荐产品</h2><table class="widefat striped"><thead><tr><th>SKU</th><th>卖家ID</th><th>标题</th></tr></thead><tbody>';
+        foreach($featured as $f) {
+            echo '<tr><td>'.esc_html($f->master_sku).'</td><td>'.intval($f->seller_id).'</td><td>'.esc_html($f->product_title).'</td></tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>暂无推荐产品。</p>';
+    }
+
+    echo '</div>';
+}
+
+
+
+// ================================
+// M8: 定价规则
+function M_render_pricing_rules_admin_page() {
+    global $wpdb;
+    $rules_table = $wpdb->prefix.'pricing_rules';
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_pricing_rule'])) {
+        check_admin_referer('add_pricing_rule_nonce','_wpnonce_add_rule');
+        $rule_name = sanitize_text_field($_POST['rule_name']);
+        $rule_type = sanitize_text_field($_POST['rule_type']);
+        $applicable_skus = isset($_POST['applicable_skus'])? sanitize_text_field($_POST['applicable_skus']) : '';
+        $exclusions = isset($_POST['exclusions'])? sanitize_text_field($_POST['exclusions']) : '';
+        $partner_adjustment_type = sanitize_text_field($_POST['partner_adjustment_type']);
+        $partner_adjustment_value = floatval($_POST['partner_adjustment_value']);
+        $list_adjustment_type = sanitize_text_field($_POST['list_adjustment_type']);
+        $list_adjustment_value = floatval($_POST['list_adjustment_value']);
+        $priority = intval($_POST['priority']);
+        $apply_to_seller_id = intval($_POST['apply_to_seller_id']);
+        $apply_to_room_id = intval($_POST['apply_to_room_id']);
+
+        $res = $wpdb->insert($rules_table, [
+            'rule_name' => $rule_name,
+            'rule_type' => $rule_type,
+            'applicable_skus' => $rule_type==='specific'?$applicable_skus:null,
+            'exclusions' => $rule_type==='global_minus_excluded'?$exclusions:null,
+            'partner_adjustment_type' => $partner_adjustment_type,
+            'partner_adjustment_value' => $partner_adjustment_value,
+            'list_adjustment_type' => $list_adjustment_type,
+            'list_adjustment_value' => $list_adjustment_value,
+            'priority' => $priority,
+            'apply_to_seller_id' => $apply_to_seller_id,
+            'apply_to_room_id' => $apply_to_room_id
+        ]);
+
+        if($res===false){
+            echo '<div class="notice notice-error"><p>规则添加失败，请检查数据库表字段。</p></div>';
+        } else {
+            echo '<div class="notice notice-success"><p>规则已成功添加。</p></div>';
+        }
+    }
+
+    $rules = $wpdb->get_results("SELECT * FROM $rules_table ORDER BY priority ASC, id ASC");
+
+    echo '<div class="wrap"><h1>M8_定价规则</h1>';
+    echo '<form method="post">';
+    wp_nonce_field('add_pricing_rule_nonce','_wpnonce_add_rule');
+    echo '<h2>新增规则</h2>
+          <table class="form-table">
+            <tr><th>规则名称</th><td><input type="text" name="rule_name" required></td></tr>
+            <tr><th>规则类型</th><td>
+                <select name="rule_type" required>
+                    <option value="global">全局</option>
+                    <option value="global_minus_excluded">全局减去排除SKU</option>
+                    <option value="specific">特定SKU</option>
+                </select>
+            </td></tr>
+            <tr><th>适用于SKU(特定时)</th><td><input type="text" name="applicable_skus" placeholder="用逗号分隔SKU"></td></tr>
+            <tr><th>排除SKU(全局减排除时)</th><td><input type="text" name="exclusions" placeholder="用逗号分隔SKU"></td></tr>
+            <tr><th>Partner调整类型</th><td>
+                <select name="partner_adjustment_type">
+                    <option value="fixed">固定加价</option>
+                    <option value="percentage">百分比</option>
+                </select>
+            </td></tr>
+            <tr><th>Partner调整值</th><td><input type="number" step="0.01" name="partner_adjustment_value" value="0"></td></tr>
+            <tr><th>List调整类型</th><td>
+                <select name="list_adjustment_type">
+                    <option value="fixed">固定加价</option>
+                    <option value="percentage">百分比</option>
+                </select>
+            </td></tr>
+            <tr><th>List调整值</th><td><input type="number" step="0.01" name="list_adjustment_value" value="0"></td></tr>
+            <tr><th>优先级</th><td><input type="number" name="priority" value="1" required></td></tr>
+            <tr><th>应用于卖家ID(0=全部)</th><td><input type="number" name="apply_to_seller_id" value="0"></td></tr>
+            <tr><th>应用于房间ID(0=全部)</th><td><input type="number" name="apply_to_room_id" value="0"></td></tr>
+          </table>
+          <input type="submit" class="button button-primary" name="add_pricing_rule" value="添加规则">
+          </form>
+          <hr>';
+
+    if($rules) {
+        echo '<h2>现有规则</h2>
+              <table class="widefat striped">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>名称</th>
+                  <th>类型</th>
+                  <th>适用SKU</th>
+                  <th>排除SKU</th>
+                  <th>Partner类型/值</th>
+                  <th>List类型/值</th>
+                  <th>优先级</th>
+                  <th>卖家ID</th>
+                  <th>房间ID</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>';
+        foreach($rules as $r) {
+            echo '<tr>
+                    <td>'.intval($r->id).'</td>
+                    <td>'.esc_html($r->rule_name).'</td>
+                    <td>'.esc_html($r->rule_type).'</td>
+                    <td>'.esc_html($r->applicable_skus).'</td>
+                    <td>'.esc_html($r->exclusions).'</td>
+                    <td>'.esc_html($r->partner_adjustment_type).'('.$r->partner_adjustment_value.')</td>
+                    <td>'.esc_html($r->list_adjustment_type).'('.$r->list_adjustment_value.')</td>
+                    <td>'.intval($r->priority).'</td>
+                    <td>'.intval($r->apply_to_seller_id).'</td>
+                    <td>'.intval($r->apply_to_room_id).'</td>
+                    <td><a href="#" class="delete-rule" data-id="'.intval($r->id).'">删除</a></td>
+                  </tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>暂无规则。</p>';
+    }
+
+    $nonce = wp_create_nonce('delete_pricing_rule_nonce');
+    ?>
+    <script type="text/javascript">
+    jQuery(document).ready(function($) {
+        $('.delete-rule').on('click', function(e) {
+            e.preventDefault();
+            const ruleId = $(this).data('id');
+            if (confirm("确定删除此规则吗？")) {
+                $.ajax({
+                    url: ajaxurl,
+                    type: 'POST',
+                    data: {
+                        action: 'delete_pricing_rule',
+                        rule_id: ruleId,
+                        _ajax_nonce: '<?php echo $nonce; ?>'
+                    },
+                    success: function(response) {
+                        if (response.success) {
+                            alert('规则已删除。');
+                            location.reload();
+                        } else {
+                            alert('删除规则失败：' + response.data);
+                        }
+                    },
+                    error: function() {
+                        alert('删除规则时出错，请重试。');
+                    }
+                });
+            }
+        });
+    });
+    </script>
+    <?php
+    echo '</div>';
+}
+
+add_action('wp_ajax_delete_pricing_rule', 'M_delete_pricing_rule');
+function M_delete_pricing_rule() {
+    check_ajax_referer('delete_pricing_rule_nonce');
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('无权限');
+    }
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'pricing_rules';
+    $rule_id = isset($_POST['rule_id']) ? intval($_POST['rule_id']) : 0;
+    if ($rule_id) {
+        $deleted = $wpdb->delete($table_name, ['id'=>$rule_id], ['%d']);
+        if ($deleted) {
+            wp_send_json_success();
+        } else {
+            wp_send_json_error('删除规则失败');
+        }
+    } else {
+        wp_send_json_error('无效规则ID');
+    }
+}
+
+// Final surcharge page
+function M_final_surcharge_page() {
+    if($_SERVER['REQUEST_METHOD']==='POST' && current_user_can('manage_options')) {
+        check_admin_referer('m_final_surcharge','m_final_surcharge_nonce');
+        $partner=floatval($_POST['final_surcharge_partner']);
+        $list=floatval($_POST['final_surcharge_list']);
+        update_option('m_xwz_final_surcharge_partner',$partner);
+        update_option('m_xwz_final_surcharge_list',$list);
+        echo '<div class="notice notice-success"><p>最终附加费更新成功。</p></div>';
+    }
+    $partner=M_xwz_get_final_surcharge_partner();
+    $list=M_xwz_get_final_surcharge_list();
+    echo '<div class="wrap"><h1>M_最终附加费设定</h1>
+          <form method="post">';
+    wp_nonce_field('m_final_surcharge','m_final_surcharge_nonce');
+    echo '<table class="form-table">
+            <tr><th>Partner附加费(%)</th><td><input type="number" step="0.01" name="final_surcharge_partner" value="'.esc_attr($partner).'"></td></tr>
+            <tr><th>List附加费(%)</th><td><input type="number" step="0.01" name="final_surcharge_list" value="'.esc_attr($list).'"></td></tr>
+          </table>';
+    submit_button('保存');
+    echo '</form></div>';
+}
+
+// Pricing rules table ensure function is already done above.
+
+
+/* THIS IS THE ID AND NAME (258) xx Display Single Prouduct(fixed) */
+/**
+ * Shortcode to display a single product
+ */
+
+/*
+if (!function_exists('display_single_product_shortcode')) {
+    add_shortcode('display_single_product', 'display_single_product_shortcode');
+    function display_single_product_shortcode($atts) {
+        global $wpdb;
+
+        $atts = shortcode_atts(array('sku' => '', 'id' => ''), $atts, 'display_single_product');
+        $product_id = isset($_GET['id']) ? intval($_GET['id']) : intval($atts['id']);
+        $sku = isset($_GET['sku']) ? sanitize_text_field($_GET['sku']) : sanitize_text_field($atts['sku']);
+
+        if (empty($product_id)) {
+            return '<p class="no-product">No SKU provided.</p>';
+        }
+
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+        $master_products_table = $wpdb->prefix . 'master_products';
+
+        // Get user info and affiliate status
+        $current_user_id = get_current_user_id();
+        $affiliate_id = '';
+        if ($current_user_id > 0) {
+            $affiliate_id = trim(get_user_meta($current_user_id, 'affiliate_id', true));
+        }
+
+        // We always use a DUMMY WooCommerce product ID
+        $wc_product_id = 1371;
+
+        // Handle Add to Cart
+       
+		// here test 168
+// Handle Add to Cart
+// Replace the "Handle Add to Cart" section in display_single_product_shortcode with this corrected code
+if (isset($_POST['add_custom_product_to_cart']) && $wc_product_id > 0) {
+    $quantity_to_add = max(1, intval($_POST['quantity']));
+    $current_product_id = intval($_POST['current_product_id']);
+    
+    // Get user info and affiliate status
+    $current_user_id = get_current_user_id();
+    $affiliate_id = '';
+    if ($current_user_id > 0) {
+        $affiliate_id = trim(get_user_meta($current_user_id, 'affiliate_id', true));
+    }
+
+    // Check if this product is from an allowed supplier
+    $supplier_check_passed = true;
+    $supplier_ids = xwz_get_allowed_supplier_ids();
+    
+    if (!empty($supplier_ids)) {
+        $supplier_check_passed = false;
+        
+        // Query to check if the product is from an allowed supplier
+        $supplier_check = $wpdb->get_var($wpdb->prepare("
+            SELECT 1 
+            FROM $supplier_stock_table 
+            WHERE id = %d AND seller_id IN ($supplier_ids)
+            LIMIT 1
+        ", $current_product_id));
+        
+        if ($supplier_check) {
+            $supplier_check_passed = true;
+        }
+    }
+    
+    if (!$supplier_check_passed) {
+        wc_add_notice('此产品不在您可用的供应商列表中。', 'error');
+    } else {
+        // Query product with complete information
+        $product_row = $wpdb->get_row($wpdb->prepare("
+            SELECT s.*, m.product_title, m.product_category, m.brand, m.main_photo, 
+                   m.multiple_photos, m.room_id, s.is_featured, s.public_remark, 
+                   s.supplier_notes, s.on_sale
+            FROM $master_products_table m
+            INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+            WHERE s.id = %d AND s.is_visible = 1
+            LIMIT 1
+        ", $current_product_id));
+
+        if (!$product_row) {
+            wc_add_notice('无法找到该产品信息。', 'error');
+        } else {
+            // Check available quantity
+            $available_qty_db = (int) $wpdb->get_var($wpdb->prepare("
+                SELECT quantity FROM $supplier_stock_table WHERE id = %d
+            ", $current_product_id));
+
+            if ($quantity_to_add > $available_qty_db) {
+                wc_add_notice('抱歉，库存不足，无法加入购物车。', 'error');
+            } else {
+                // Extract prices from product_row
+                $list_price = floatval($product_row->list_price);
+                $partner_price = floatval($product_row->partner_price);
+                
+                // Get the fully adjusted list price (including all rules)
+                $adjusted_list_price = M_xwz_get_final_adjusted_price(
+                    $list_price,
+                    $product_row->sku,
+                    $current_user_id,
+                    $product_row->seller_id,
+                    $product_row->room_id
+                );
+
+                // Check for fixed price override
+                global $wpdb;
+                $fixed_prices_table = $wpdb->prefix . 'xwz_user_fixed_prices';
+
+                // First check direct user fixed price
+                $user_fixed_price = $wpdb->get_var($wpdb->prepare(
+                    "SELECT fixed_price FROM $fixed_prices_table 
+                     WHERE sku = %s AND target_type = 'user' 
+                     AND target_id = %d AND active = 1",
+                    $product_row->sku,
+                    $current_user_id
+                ));
+
+                if ($user_fixed_price !== null) {
+                    $adjusted_list_price = floatval($user_fixed_price);
+                } else {
+                    // Improved family ID lookup
+                    $family_id = $wpdb->get_var($wpdb->prepare(
+                        "SELECT meta_value FROM {$wpdb->prefix}usermeta 
+                         WHERE user_id = %d AND meta_key = 'family_id' 
+                         LIMIT 1",
+                        $current_user_id
+                    ));
+                    
+                    if ($family_id) {
+                        $family_fixed_price = $wpdb->get_var($wpdb->prepare(
+                            "SELECT fixed_price FROM $fixed_prices_table 
+                             WHERE sku = %s AND target_type = 'family' 
+                             AND target_id = %s AND active = 1",
+                            $product_row->sku,
+                            $family_id
+                        ));
+                        
+                        if ($family_fixed_price !== null) {
+                            $adjusted_list_price = floatval($family_fixed_price);
+                        }
+                    }
+                }
+
+                // Get adjusted partner price
+                $adjusted_partner_price = M_xwz_get_adjusted_price(
+                    $partner_price,
+                    'partner',
+                    $product_row->sku,
+                    $product_row->seller_id,
+                    $product_row->room_id
+                );
+
+                // The final price will be the fully adjusted list price for non-affiliates
+                // or the partner price for affiliates
+                $final_price = !empty($affiliate_id) ? $adjusted_partner_price : $adjusted_list_price;
+
+                // Prepare cart item data with the fully adjusted prices
+                $cart_item_data = array(
+                    'custom_price' => $final_price,
+                    'custom_sku' => $product_row->sku,
+                    'product_title' => $product_row->product_title,
+                    'brand' => $product_row->brand,
+                    'category' => $product_row->product_category,
+                    'supplier_row_id' => $product_row->id,
+                    'list_price' => $adjusted_list_price,         // This is now the fully adjusted list price
+                    'original_list_price' => $list_price,         // Store original price for reference
+                    'partner_price' => $adjusted_partner_price,
+                    'is_affiliate' => !empty($affiliate_id)
+                );
+
+                // Add to cart
+                $cart_item_key = WC()->cart->add_to_cart(
+                    $wc_product_id,
+                    $quantity_to_add,
+                    0,
+                    array(),
+                    $cart_item_data
+                );
+
+                if ($cart_item_key) {
+                    wp_safe_redirect(wc_get_checkout_url());
+                    exit;
+                } else {
+                    wc_add_notice('无法添加到购物车，请重试。', 'error');
+                }
+            }
+        }
+    }
+}
+        // Get product info for display
+      // Add this before the product query
+$supplier_filter = '';
+$supplier_ids = xwz_get_allowed_supplier_ids();
+
+if (!empty($supplier_ids)) {
+    $supplier_filter = " AND s.seller_id IN ($supplier_ids)";
+}
+
+// Get product info for display
+$product = $wpdb->get_row($wpdb->prepare("
+    SELECT s.*, 
+           m.product_title, 
+           m.product_category, 
+           m.brand, 
+           m.main_photo, 
+           m.multiple_photos, 
+           m.room_id, 
+           s.is_featured, 
+           s.public_remark, 
+           s.supplier_notes, 
+           s.on_sale,
+           m.seats_reference
+    FROM $master_products_table m
+    INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+    WHERE s.id = %d AND s.is_visible = 1
+    $supplier_filter
+    LIMIT 1
+", $product_id));
+
+// If no product found with filter, try again without the filter
+if (!$product && !empty($supplier_filter)) {
+    $product = $wpdb->get_row($wpdb->prepare("
+        SELECT s.*, 
+               m.product_title, 
+               m.product_category, 
+               m.brand, 
+               m.main_photo, 
+               m.multiple_photos, 
+               m.room_id, 
+               s.is_featured, 
+               s.public_remark, 
+               s.supplier_notes, 
+               s.on_sale,
+               m.seats_reference
+        FROM $master_products_table m
+        INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+        WHERE s.id = %d AND s.is_visible = 1
+        LIMIT 1
+    ", $product_id));
+}
+
+        if (!$product) {
+            return '<p class="no-product">没有找到该产品。</p>';
+        }
+
+        // Get base prices
+        $rrp = floatval($product->recommended_retail_price);
+        $list_price = floatval($product->list_price);
+        $partner_price = floatval($product->partner_price);
+        $quantity = intval($product->quantity);
+
+        // Calculate adjusted prices
+        // Calculate adjusted prices - base price
+$adjusted_list_price = M_xwz_get_final_adjusted_price(
+    $list_price,
+    $product->sku,
+    $current_user_id,
+    $product->seller_id,
+    $product->room_id
+);
+
+// Check for fixed price override
+global $wpdb;
+$fixed_prices_table = $wpdb->prefix . 'xwz_user_fixed_prices';
+
+// First check direct user fixed price
+$user_fixed_price = $wpdb->get_var($wpdb->prepare(
+    "SELECT fixed_price FROM $fixed_prices_table 
+     WHERE sku = %s AND target_type = 'user' 
+     AND target_id = %d AND active = 1",
+    $product->sku,
+    $current_user_id
+));
+
+if ($user_fixed_price !== null) {
+    $adjusted_list_price = floatval($user_fixed_price);
+} else {
+    // Improved family ID lookup
+    $family_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT meta_value FROM {$wpdb->prefix}usermeta 
+         WHERE user_id = %d AND meta_key = 'family_id' 
+         LIMIT 1",
+        $current_user_id
+    ));
+    
+    if ($family_id) {
+        $family_fixed_price = $wpdb->get_var($wpdb->prepare(
+            "SELECT fixed_price FROM $fixed_prices_table 
+             WHERE sku = %s AND target_type = 'family' 
+             AND target_id = %s AND active = 1",
+            $product->sku,
+            $family_id
+        ));
+        
+        if ($family_fixed_price !== null) {
+            $adjusted_list_price = floatval($family_fixed_price);
+        }
+    }
+}
+
+        $adjusted_partner_price = M_xwz_get_adjusted_price(
+            $partner_price,
+            'partner',
+            $product->sku,
+            $product->seller_id,
+            $product->room_id
+        );
+
+        // Clean and prepare photo URLs
+        $main_photo_raw = $product->main_photo;
+        $main_photo_raw = M_xwz_clean_photo_url($main_photo_raw);
+        if (empty($main_photo_raw)) {
+            $main_photo_raw = '/wp-content/uploads/2025/02/coming-soon.png';
+        }
+
+        $photo_urls = [];
+        $photo_urls[] = $main_photo_raw;
+        if(!empty($product->multiple_photos)){
+            $extra_photos = explode(',', $product->multiple_photos);
+            foreach($extra_photos as $ep){
+                $ep = M_xwz_clean_photo_url($ep);
+                if(!empty($ep)) {
+                    $photo_urls[] = $ep;
+                }
+            }
+        }
+
+        $main_image = $photo_urls[0];
+        $in_stock = ($quantity > 0);
+
+        // Get any notices
+        ob_start();
+        wc_print_notices();
+        $notices = ob_get_clean();
+
+        $back_to_products_url = site_url('/');
+
+        // Start building output
+        $output = '<div class="single-product-container">';
+        $output .= $notices;
+
+        if (!empty($back_to_products_url)) {
+            $output .= '<p class="back-link"><a href="'.esc_url($back_to_products_url).'">← 返回列表</a></p>';
+        }
+
+        $output .= '<div class="single-product">';
+
+        // Product images section
+        $output .= '<div class="single-product-images">';
+        if ($product->is_featured == 1 && $product->on_sale == 1) {
+            $output .= '<span class="featured-label">特 + 速 </span>';
+        } elseif ($product->is_featured == 1) {
+            $output .= '<span class="featured-label">速</span>';
+        } elseif ($product->on_sale == 1) {
+            $output .= '<span class="featured-label" style="background:#FF5722;">特 </span>';
+        }
+
+        $output .= '<div class="main-image"><img src="'.esc_url($main_image).'" alt="'.esc_attr($product->product_title).'"></div>';
+        if (count($photo_urls) > 1) {
+            $output .= '<div class="thumbnails" style="margin-top:5px;display:flex;gap:5px;overflow-x:auto;">';
+            for ($i=1;$i<count($photo_urls);$i++) {
+                $thumb_url = $photo_urls[$i];
+                $output .= '<img src="'.esc_url($thumb_url).'" alt="Thumbnail" class="thumbnail-img" style="width:50px;height:50px;object-fit:cover;cursor:pointer;border:1px solid #ddd;border-radius:3px;" onclick="document.querySelector(\'.main-image img\').src=\''.esc_url($thumb_url).'\'">';
+            }
+            $output .= '</div>';
+        }
+        $output .= '</div>';
+
+        // Product info section
+        $output .= '<div class="single-product-info">';
+        $output .= '<h2 class="product-title">'.wp_kses_post($product->product_title).'</h2>';
+
+        // Display prices
+        if ($rrp > 0) {
+            $output .= '<p class="rrp-price">建议零售价: ' . number_format($rrp, 0) . ' (H  ' . get_hkd_price($rrp) . ')</p>';
+        }
+
+        // Always show adjusted list price
+        $output .= '<p class="final-price">列表价: ' . number_format($adjusted_list_price, 0) . ' (H  ' . get_hkd_price($adjusted_list_price) . ')</p>';
+
+        // Show partner price only for affiliates
+        if (!empty($affiliate_id)) {
+            $output .= '<p class="final-price">伙伴价: ' . number_format($adjusted_partner_price, 0) . ' (H  ' . get_hkd_price($adjusted_partner_price) . ')</p>';
+        }
+
+        // Stock info
+        if ($in_stock) {
+            $output .= '<p class="stock-info">In stock</p>';
+        } else {
+            $output .= '<p class="stock-info out-of-stock-message">Out of stock</p>';
+        }
+
+        // Product details
+        $output .= '<p class="product-meta">分类: '.wp_kses_post($product->product_category).' | 品牌: '.wp_kses_post($product->brand).'</p>';
+
+        if (!empty($product->public_remark)) {
+            $output .= '<p class="public-remark">备注(公开): '.wp_kses_post($product->public_remark).'</p>';
+        }
+        if (!empty($product->supplier_notes)) {
+            $output .= '<p class="suppliers-note">供应商备注: '.wp_kses_post($product->supplier_notes).'</p>';
+        }
+
+        $output .= '<p class="product-sku">SKU: '.wp_kses_post($product->sku).' (类别 '.intval($product->room_id).':'.intval($product->seller_id).')</p>';
+
+        // Add to cart form
+        if ($in_stock) {
+            $output .= '<form method="post" style="margin-top:10px; display:flex; gap:5px; align-items:center;">
+                <input type="hidden" name="current_product_id" value="'.esc_attr($product_id).'">
+                <input type="number" name="quantity" min="1" max="'.intval($product->quantity).'" value="1" style="width:50px; font-size:0.9em;">
+                <button type="submit" name="add_custom_product_to_cart" class="add-to-cart-btn">加入购物车</button>
+            </form>';
+        } else {
+            $output .= '<p class="out-of-stock-message">该产品已缺货。</p>';
+        }
+
+        if (!empty($product->seats_reference)) {
+            $output .= '<p class="seats-reference"> '.wp_kses_post($product->seats_reference).'</p>';
+        }
+        $output .= '</div></div></div>';
+
+        // Add CSS styles
+        $output .= '<style>
+		
+
+
+		
+		
+            .single-product-container {
+                width:100%;
+                max-width:80%;
+                margin:0 auto;
+                padding:15px;
+                box-sizing:border-box;
+                font-family:sans-serif;
+            }
+            .back-link {
+                margin-bottom:10px;
+            }
+            .back-link a {
+                text-decoration:none;
+                color:#4285f4;
+                font-size:0.9em;
+            }
+            .back-link a:hover {
+                text-decoration:underline;
+            }
+            .single-product {
+                display:flex;
+                flex-wrap:wrap;
+                background:#fff;
+                border:1px solid #ddd;
+                border-radius:3px;
+                box-shadow:0 2px 4px rgba(0,0,0,0.1);
+                padding:10px;
+                position:relative;
+            }
+            .single-product-images, .single-product-info {
+                width:100%;
+            }
+            .main-image img {
+                width:100%;
+                height:auto;
+                border-radius:3px;
+                object-fit:cover;
+            }
+            .featured-label {
+                position:absolute;
+                top:10px;
+                left:10px;
+                background:#E91E63;
+                color:#fff;
+                font-size:0.7em;
+                padding:3px 6px;
+                border-radius:3px;
+                z-index:2;
+            }
+            .thumbnails {
+                display:flex;
+                margin-top:5px;
+                gap:5px;
+                overflow-x:auto;
+            }
+            .thumbnail-img {
+                width:50px;
+                height:50px;
+                object-fit:cover;
+                border:1px solid #ddd;
+                border-radius:3px;
+                cursor:pointer;
+            }
+            .product-title {
+                font-size:1.1em;
+                margin:0 0 10px 0;
+                color:#333;
+                font-weight:bold;
+            }
+            .rrp-price {
+                font-size:0.9em;
+                color:#999;
+                margin:5px 0;
+                text-decoration:line-through;
+            }
+            .final-price {
+                font-size:0.9em;
+                color:#333;
+                margin:5px 0;
+                font-weight:bold;
+            }
+            .stock-info {
+                margin:5px 0;
+                font-size:0.9em;
+                color:#4CAF50;
+            }
+            .out-of-stock-message {
+                color:#a94442;
+                font-weight:bold;
+                font-size:0.9em;
+            }
+            .product-meta, .product-room, .public-remark, .suppliers-note, .product-sku, .seats-reference {
+                font-size:0.9em;
+                color:#666;
+                margin:5px 0;
+            }
+            .seats-reference {
+                font-size:0.9em;
+                color:#555;
+                margin:5px 0;
+            }
+            .add-to-cart-btn {
+                background:#FFC107;
+                color:#333;
+                border:none;
+                padding:5px 10px;
+                border-radius:3px;
+                font-size:0.9em;
+                cursor:pointer;
+                white-space:nowrap;
+            }
+            .add-to-cart-btn:hover {
+                background:#ffb300;
+            }
+            @media(min-width:480px) {
+                .single-product-images {
+                    width:40%;
+                    padding-right:10px;
+                    box-sizing:border-box;
+                }
+                .single-product-info {
+                    width:60%;
+                    padding-left:10px;
+                    box-sizing:border-box;
+                }
+            }
+        </style>';
+
+        return $output;
+    }
+}
+
+
+*/
+
+//test999
+if (!function_exists('display_single_product_shortcode')) {
+    add_shortcode('display_single_product', 'display_single_product_shortcode');
+    function display_single_product_shortcode($atts) {
+        global $wpdb;
+
+        $atts = shortcode_atts(array('sku' => '', 'id' => ''), $atts, 'display_single_product');
+        $product_id = isset($_GET['id']) ? intval($_GET['id']) : intval($atts['id']);
+        $sku = isset($_GET['sku']) ? sanitize_text_field($_GET['sku']) : sanitize_text_field($atts['sku']);
+
+        if (empty($product_id)) {
+            return '<p class="no-product">No SKU provided.</p>';
+        }
+
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+        $master_products_table = $wpdb->prefix . 'master_products';
+
+        // Get user info and affiliate status
+        $current_user_id = get_current_user_id();
+        $affiliate_id = '';
+        if ($current_user_id > 0) {
+            $affiliate_id = trim(get_user_meta($current_user_id, 'affiliate_id', true));
+        }
+
+        // We always use a DUMMY WooCommerce product ID
+        $wc_product_id = 1371;
+
+        // Define the main products listing page URL - THIS IS CRITICAL FOR FORMS TO WORK
+        $products_page_url = site_url('/'); // Change this if your product listing is at a different URL
+
+        // Handle Add to Cart
+        if (isset($_POST['add_custom_product_to_cart']) && $wc_product_id > 0) {
+            $quantity_to_add = max(1, intval($_POST['quantity']));
+            $current_product_id = intval($_POST['current_product_id']);
+            
+            // Get user info and affiliate status
+            $current_user_id = get_current_user_id();
+            $affiliate_id = '';
+            if ($current_user_id > 0) {
+                $affiliate_id = trim(get_user_meta($current_user_id, 'affiliate_id', true));
+            }
+
+            // Check if this product is from an allowed supplier
+            $supplier_check_passed = true;
+            $supplier_ids = xwz_get_allowed_supplier_ids();
+            
+            if (!empty($supplier_ids)) {
+                $supplier_check_passed = false;
+                
+                // Query to check if the product is from an allowed supplier
+                $supplier_check = $wpdb->get_var($wpdb->prepare("
+                    SELECT 1 
+                    FROM $supplier_stock_table 
+                    WHERE id = %d AND seller_id IN ($supplier_ids)
+                    LIMIT 1
+                ", $current_product_id));
+                
+                if ($supplier_check) {
+                    $supplier_check_passed = true;
+                }
+            }
+            
+            if (!$supplier_check_passed) {
+                wc_add_notice('此产品不在您可用的供应商列表中。', 'error');
+            } else {
+                // Query product with complete information
+                $product_row = $wpdb->get_row($wpdb->prepare("
+                    SELECT s.*, m.product_title, m.product_category, m.brand, m.main_photo, 
+                           m.multiple_photos, m.room_id, s.is_featured, s.public_remark, 
+                           s.supplier_notes, s.on_sale
+                    FROM $master_products_table m
+                    INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+                    WHERE s.id = %d AND s.is_visible = 1
+                    LIMIT 1
+                ", $current_product_id));
+
+                if (!$product_row) {
+                    wc_add_notice('无法找到该产品信息。', 'error');
+                } else {
+                    // Check available quantity
+                    $available_qty_db = (int) $wpdb->get_var($wpdb->prepare("
+                        SELECT quantity FROM $supplier_stock_table WHERE id = %d
+                    ", $current_product_id));
+
+                    if ($quantity_to_add > $available_qty_db) {
+                        wc_add_notice('抱歉，库存不足，无法加入购物车。', 'error');
+                    } else {
+                        // Extract prices from product_row
+                        $list_price = floatval($product_row->list_price);
+                        $partner_price = floatval($product_row->partner_price);
+                        
+                        // Get the fully adjusted list price (including all rules)
+                        $adjusted_list_price = M_xwz_get_final_adjusted_price(
+                            $list_price,
+                            $product_row->sku,
+                            $current_user_id,
+                            $product_row->seller_id,
+                            $product_row->room_id
+                        );
+
+                        // Check for fixed price override
+                        global $wpdb;
+                        $fixed_prices_table = $wpdb->prefix . 'xwz_user_fixed_prices';
+
+                        // First check direct user fixed price
+                        $user_fixed_price = $wpdb->get_var($wpdb->prepare(
+                            "SELECT fixed_price FROM $fixed_prices_table 
+                             WHERE sku = %s AND target_type = 'user' 
+                             AND target_id = %d AND active = 1",
+                            $product_row->sku,
+                            $current_user_id
+                        ));
+
+                        if ($user_fixed_price !== null) {
+                            $adjusted_list_price = floatval($user_fixed_price);
+                        } else {
+                            // Improved family ID lookup
+                            $family_id = $wpdb->get_var($wpdb->prepare(
+                                "SELECT meta_value FROM {$wpdb->prefix}usermeta 
+                                 WHERE user_id = %d AND meta_key = 'family_id' 
+                                 LIMIT 1",
+                                $current_user_id
+                            ));
+                            
+                            if ($family_id) {
+                                $family_fixed_price = $wpdb->get_var($wpdb->prepare(
+                                    "SELECT fixed_price FROM $fixed_prices_table 
+                                     WHERE sku = %s AND target_type = 'family' 
+                                     AND target_id = %s AND active = 1",
+                                    $product_row->sku,
+                                    $family_id
+                                ));
+                                
+                                if ($family_fixed_price !== null) {
+                                    $adjusted_list_price = floatval($family_fixed_price);
+                                }
+                            }
+                        }
+
+                        // Get adjusted partner price
+                        $adjusted_partner_price = M_xwz_get_adjusted_price(
+                            $partner_price,
+                            'partner',
+                            $product_row->sku,
+                            $product_row->seller_id,
+                            $product_row->room_id
+                        );
+
+                        // The final price will be the fully adjusted list price for non-affiliates
+                        // or the partner price for affiliates
+                        $final_price = !empty($affiliate_id) ? $adjusted_partner_price : $adjusted_list_price;
+
+                        // Prepare cart item data with the fully adjusted prices
+                        $cart_item_data = array(
+                            'custom_price' => $final_price,
+                            'custom_sku' => $product_row->sku,
+                            'product_title' => $product_row->product_title,
+                            'brand' => $product_row->brand,
+                            'category' => $product_row->product_category,
+                            'supplier_row_id' => $product_row->id,
+                            'list_price' => $adjusted_list_price,         // This is now the fully adjusted list price
+                            'original_list_price' => $list_price,         // Store original price for reference
+                            'partner_price' => $adjusted_partner_price,
+                            'is_affiliate' => !empty($affiliate_id)
+                        );
+
+                        // Add to cart
+                        $cart_item_key = WC()->cart->add_to_cart(
+                            $wc_product_id,
+                            $quantity_to_add,
+                            0,
+                            array(),
+                            $cart_item_data
+                        );
+
+                        if ($cart_item_key) {
+                            wp_safe_redirect(wc_get_checkout_url());
+                            exit;
+                        } else {
+                            wc_add_notice('无法添加到购物车，请重试。', 'error');
+                        }
+                    }
+                }
+            }
+        }
+
+        // Get product info for display
+        $supplier_filter = '';
+        $supplier_ids = xwz_get_allowed_supplier_ids();
+
+        if (!empty($supplier_ids)) {
+            $supplier_filter = " AND s.seller_id IN ($supplier_ids)";
+        }
+
+        // Get product info for display
+        $product = $wpdb->get_row($wpdb->prepare("
+            SELECT s.*, 
+                m.product_title, 
+                m.product_category, 
+                m.brand, 
+                m.main_photo, 
+                m.multiple_photos, 
+                m.room_id, 
+                s.is_featured, 
+                s.public_remark, 
+                s.supplier_notes, 
+                s.on_sale,
+                m.seats_reference
+            FROM $master_products_table m
+            INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+            WHERE s.id = %d AND s.is_visible = 1
+            $supplier_filter
+            LIMIT 1
+        ", $product_id));
+
+        // If no product found with filter, try again without the filter
+        if (!$product && !empty($supplier_filter)) {
+            $product = $wpdb->get_row($wpdb->prepare("
+                SELECT s.*, 
+                    m.product_title, 
+                    m.product_category, 
+                    m.brand, 
+                    m.main_photo, 
+                    m.multiple_photos, 
+                    m.room_id, 
+                    s.is_featured, 
+                    s.public_remark, 
+                    s.supplier_notes, 
+                    s.on_sale,
+                    m.seats_reference
+                FROM $master_products_table m
+                INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+                WHERE s.id = %d AND s.is_visible = 1
+                LIMIT 1
+            ", $product_id));
+        }
+
+        if (!$product) {
+            return '<p class="no-product">没有找到该产品。</p>';
+        }
+
+        // Get parameters for search and filters
+        $selected_brand = isset($_GET['brand_filter']) ? sanitize_text_field($_GET['brand_filter']) : '';
+        $search_query = isset($_GET['search_query']) ? sanitize_text_field($_GET['search_query']) : '';
+        $room_id = isset($_GET['room_id']) ? sanitize_text_field($_GET['room_id']) : '';
+        $is_featured = isset($_GET['is_featured']) ? sanitize_text_field($_GET['is_featured']) : '';
+        $sales = isset($_GET['sales']) ? sanitize_text_field($_GET['sales']) : '';
+        $display_filter = isset($_GET['display_filter']) ? sanitize_text_field($_GET['display_filter']) : 'price_stock';
+        $category_filter = isset($_GET['category_filter']) ? sanitize_text_field($_GET['category_filter']) : '';
+
+        // Get base prices
+        $rrp = floatval($product->recommended_retail_price);
+        $list_price = floatval($product->list_price);
+        $partner_price = floatval($product->partner_price);
+        $quantity = intval($product->quantity);
+
+        // Calculate adjusted prices
+        $adjusted_list_price = M_xwz_get_final_adjusted_price(
+            $list_price,
+            $product->sku,
+            $current_user_id,
+            $product->seller_id,
+            $product->room_id
+        );
+
+        // Check for fixed price override
+        global $wpdb;
+        $fixed_prices_table = $wpdb->prefix . 'xwz_user_fixed_prices';
+
+        // First check direct user fixed price
+        $user_fixed_price = $wpdb->get_var($wpdb->prepare(
+            "SELECT fixed_price FROM $fixed_prices_table 
+            WHERE sku = %s AND target_type = 'user' 
+            AND target_id = %d AND active = 1",
+            $product->sku,
+            $current_user_id
+        ));
+
+        if ($user_fixed_price !== null) {
+            $adjusted_list_price = floatval($user_fixed_price);
+        } else {
+            // Improved family ID lookup
+            $family_id = $wpdb->get_var($wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->prefix}usermeta 
+                WHERE user_id = %d AND meta_key = 'family_id' 
+                LIMIT 1",
+                $current_user_id
+            ));
+            
+            if ($family_id) {
+                $family_fixed_price = $wpdb->get_var($wpdb->prepare(
+                    "SELECT fixed_price FROM $fixed_prices_table 
+                    WHERE sku = %s AND target_type = 'family' 
+                    AND target_id = %s AND active = 1",
+                    $product->sku,
+                    $family_id
+                ));
+                
+                if ($family_fixed_price !== null) {
+                    $adjusted_list_price = floatval($family_fixed_price);
+                }
+            }
+        }
+
+        $adjusted_partner_price = M_xwz_get_adjusted_price(
+            $partner_price,
+            'partner',
+            $product->sku,
+            $product->seller_id,
+            $product->room_id
+        );
+
+        // Clean and prepare photo URLs
+        $main_photo_raw = $product->main_photo;
+        $main_photo_raw = M_xwz_clean_photo_url($main_photo_raw);
+        if (empty($main_photo_raw)) {
+            $main_photo_raw = '/wp-content/uploads/2025/02/coming-soon.png';
+        }
+
+        $photo_urls = [];
+        $photo_urls[] = $main_photo_raw;
+        if(!empty($product->multiple_photos)){
+            $extra_photos = explode(',', $product->multiple_photos);
+            foreach($extra_photos as $ep){
+                $ep = M_xwz_clean_photo_url($ep);
+                if(!empty($ep)) {
+                    $photo_urls[] = $ep;
+                }
+            }
+        }
+
+        $main_image = $photo_urls[0];
+        $in_stock = ($quantity > 0);
+
+        // Get any notices
+        ob_start();
+        wc_print_notices();
+        $notices = ob_get_clean();
+
+        $back_to_products_url = $products_page_url;
+
+        // Start building output - NEW LAYOUT WITH SEARCH BAR AND LEFT SIDEBAR
+        $output = '<div id="header">';
+        $output .= '<div class="header-inner">';
+        $output .= '<div class="search-wrapper">';
+        // FIXED: Add action attribute to the search form
+        $output .= get_products_search_form_fixed($search_query, $selected_brand, $room_id, $is_featured, $sales, $products_page_url);
+        $output .= '</div>';
+
+        // Hide Prices Toggle Switch
+        $output .= '<div class="hide-prices-container">';
+        $output .= '    <label class="switch" title="隐藏价格">';
+        $output .= '        <input type="checkbox" id="hide-prices-toggle">';
+        $output .= '        <span class="slider round"></span>';
+        $output .= '    </label>';
+        $output .= '    <span class="switch-label"></span>';
+        $output .= '</div>';
+        $output .= '</div>'; // End of header-inner
+        $output .= '</div>'; // End of header
+
+        $output .= '<div id="product-page-container">';
+
+        // LEFT COLUMN with category and brand filters
+        $output .= '<div id="left-column">';
+        // FIXED: Add action attribute to the filters form
+        $output .= '<form method="get" action="'.esc_url($products_page_url).'" class="filters-form">';
+
+        foreach ($_GET as $key => $value) {
+            // Preserve all query vars except certain ones
+            if (!in_array($key, array('display_filter', 'category_filter', 'search_query','paged','sku', 'id'))) {
+                $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+            }
+        }
+        $output .= '<div class="filters-row">';
+        // FIXED: Pass the products page URL to the filter functions
+        $output .= get_products_display_filter_fixed($display_filter, $products_page_url);
+        $output .= get_products_category_filter_fixed($category_filter, $products_page_url);
+        $output .= '</div>';
+        $output .= '</form>';
+        // FIXED: Pass the products page URL to the brands menu
+        $output .= get_brands_menu_fixed($selected_brand, $products_page_url);
+        $output .= '</div>'; // End of left-column
+
+        // RIGHT CONTENT - Product Detail
+        $output .= '<div id="right-content">';
+        $output .= $notices;
+
+        if (!empty($back_to_products_url)) {
+            $output .= '<p class="back-link"><a href="'.esc_url($back_to_products_url).'">← 返回列表</a></p>';
+        }
+
+        $output .= '<div class="single-product">';
+
+        // Product images section
+        $output .= '<div class="single-product-images">';
+        if ($product->is_featured == 1 && $product->on_sale == 1) {
+            $output .= '<span class="featured-label">特 + 速 </span>';
+        } elseif ($product->is_featured == 1) {
+            $output .= '<span class="featured-label">速</span>';
+        } elseif ($product->on_sale == 1) {
+            $output .= '<span class="featured-label" style="background:#FF5722;">特 </span>';
+        }
+
+        $output .= '<div class="main-image"><img src="'.esc_url($main_image).'" alt="'.esc_attr($product->product_title).'"></div>';
+        if (count($photo_urls) > 1) {
+            $output .= '<div class="thumbnails" style="margin-top:5px;display:flex;gap:5px;overflow-x:auto;">';
+            for ($i=1;$i<count($photo_urls);$i++) {
+                $thumb_url = $photo_urls[$i];
+                $output .= '<img src="'.esc_url($thumb_url).'" alt="Thumbnail" class="thumbnail-img" style="width:50px;height:50px;object-fit:cover;cursor:pointer;border:1px solid #ddd;border-radius:3px;" onclick="document.querySelector(\'.main-image img\').src=\''.esc_url($thumb_url).'\'">';
+            }
+            $output .= '</div>';
+        }
+        $output .= '</div>';
+
+        // Product info section
+        $output .= '<div class="single-product-info">';
+        $output .= '<h2 class="product-title">'.wp_kses_post($product->product_title).'</h2>';
+
+        // Display prices
+        if ($rrp > 0) {
+            $output .= '<p class="rrp-price">建议零售价: ' . number_format($rrp, 0) . ' (H  ' . get_hkd_price($rrp) . ')</p>';
+        }
+
+        // Always show adjusted list price
+        $output .= '<p class="final-price">列表价: ' . number_format($adjusted_list_price, 0) . ' (H  ' . get_hkd_price($adjusted_list_price) . ')</p>';
+
+        // Show partner price only for affiliates
+        if (!empty($affiliate_id)) {
+            $output .= '<p class="final-price">伙伴价: ' . number_format($adjusted_partner_price, 0) . ' (H  ' . get_hkd_price($adjusted_partner_price) . ')</p>';
+        }
+
+        // Stock info
+        if ($in_stock) {
+            $output .= '<p class="stock-info">In stock</p>';
+        } else {
+            $output .= '<p class="stock-info out-of-stock-message">Out of stock</p>';
+        }
+
+        // Product details
+        $output .= '<p class="product-meta">分类: '.wp_kses_post($product->product_category).' | 品牌: '.wp_kses_post($product->brand).'</p>';
+
+        if (!empty($product->public_remark)) {
+            $output .= '<p class="public-remark">备注(公开): '.wp_kses_post($product->public_remark).'</p>';
+        }
+        if (!empty($product->supplier_notes)) {
+            $output .= '<p class="suppliers-note">供应商备注: '.wp_kses_post($product->supplier_notes).'</p>';
+        }
+
+        $output .= '<p class="product-sku">SKU: '.wp_kses_post($product->sku).' (类别 '.intval($product->room_id).':'.intval($product->seller_id).')</p>';
+
+        // Add to cart form
+        if ($in_stock) {
+            $output .= '<form method="post" style="margin-top:10px; display:flex; gap:5px; align-items:center;">
+                <input type="hidden" name="current_product_id" value="'.esc_attr($product_id).'">
+                <input type="number" name="quantity" min="1" max="'.intval($product->quantity).'" value="1" style="width:50px; font-size:0.9em;">
+                <button type="submit" name="add_custom_product_to_cart" class="add-to-cart-btn">加入购物车</button>
+            </form>';
+        } else {
+            $output .= '<p class="out-of-stock-message">该产品已缺货。</p>';
+        }
+
+        if (!empty($product->seats_reference)) {
+            $output .= '<p class="seats-reference"> '.wp_kses_post($product->seats_reference).'</p>';
+        }
+        $output .= '</div></div>'; // Close single-product-info and single-product divs
+        $output .= '</div>'; // Close right-content div
+        $output .= '</div>'; // Close product-page-container div
+
+        // Add CSS styles - combine product page and single product styles
+        $output .= '<style>
+            /* Global styles */
+            html, body {
+                margin:0; padding:0;
+                box-sizing:border-box;
+                font-family: Arial, sans-serif;
+                width:100%; height:100%;
+                overflow:hidden; /* Keep overflow hidden to maintain left-right layout */
+            }
+            *, *:before, *:after {
+                box-sizing:border-box;
+                margin:0; padding:0;
+            }
+            
+            /* Header and search */
+            #header {
+                width:100%;
+                border-bottom:1px solid #ddd;
+            }
+            .header-inner {
+                display:flex;
+                align-items:center;
+                width:100%;
+                padding:5px;
+            }
+            .search-wrapper {
+                width:100%;
+            }
+            .products-search-form {
+                width:100%;
+                margin:0;
+            }
+            
+            /* Product page layout */
+            #product-page-container {
+                display:flex;
+                width:100%;
+                height:calc(100vh - 36px - 1px); /* Adjust based on header height */
+                overflow:hidden; /* Prevent overall page scroll */
+            }
+            
+            /* Left column */
+            #left-column {
+                width:25%;
+                max-width: 300px;
+                border-right:1px solid #ddd;
+                overflow-y:auto; /* Allow vertical scroll within left column if content overflows */
+                overflow-x:hidden;
+                flex-shrink:0;
+                margin:0;
+                padding:0;
+            }
+            
+            .filters-form {
+                position: sticky;
+                top: 0;
+                z-index: 10;
+                background: #f9f9f9;
+                width:100%;
+                margin:0;
+                padding:5px;
+                box-sizing:border-box;
+            }
+            
+            .filters-row {
+                display:flex;
+                flex-direction:column;
+                gap:5px;
+                width:100%;
+            }
+            
+            .filter-item {
+                font-size:0.8em;
+                width:100%;
+            }
+            
+            .filter-label {
+                font-size:0.8em;
+                color:#333;
+                margin-bottom:3px;
+                white-space:nowrap;
+                font-weight:normal;
+            }
+            
+            .filter-icon {
+                margin-right:3px;
+                font-size:1em;
+            }
+            
+            .filter-select {
+                border:1px solid #ccc;
+                border-radius:3px;
+                font-size:0.8em;
+                padding:2px 5px;
+                width:100%;
+                box-sizing:border-box;
+            }
+            
+            /* Brand menu */
+            #brand-menu {
+                margin-top:5px;
+                padding:5px;
+                box-sizing:border-box;
+                width:100%;
+            }
+            #brand-menu h3 {
+                font-size:0.8em;
+                text-align:center;
+                color:#E91E63;
+                margin-bottom:5px;
+                font-weight:normal;
+                width:100%;
+            }
+            
+            #brand-menu ul {
+                list-style:none;
+                width:100%;
+            }
+            
+            #brand-menu li {
+                margin-bottom:3px;
+                width:100%;
+            }
+            
+            #brand-menu li:nth-child(1) a {
+                padding-left:8px;
+            }
+            
+            #brand-menu a {
+                text-decoration:none;
+                color:#333;
+                font-size:0.75em;
+                display:block;
+                border-radius:3px;
+                transition: background 0.3s, color 0.3s;
+                padding:3px;
+                line-height:1.1;
+                width:100%;
+                box-sizing:border-box;
+            }
+            
+            #brand-menu a:hover {
+                background:#eaeaea;
+            }
+            
+            #brand-menu a.active {
+                background:#E91E63;
+                color:#fff;
+            }
+            
+            /* Right content area */
+            #right-content {
+                flex:1;
+                overflow-y:auto; /* Allow vertical scroll within right content */
+                position:relative;
+                padding:15px;
+                box-sizing:border-box;
+            }
+            
+            /* Single product styles */
+            .single-product-container {
+                width:100%;
+                padding:15px;
+                box-sizing:border-box;
+                font-family:sans-serif;
+            }
+            .back-link {
+                margin-bottom:15px;
+            }
+            .back-link a {
+                text-decoration:none;
+                color:#4285f4;
+                font-size:0.9em;
+            }
+            .back-link a:hover {
+                text-decoration:underline;
+            }
+            .single-product {
+                display:flex;
+                flex-wrap:wrap;
+                background:#fff;
+                border:1px solid #ddd;
+                border-radius:3px;
+                box-shadow:0 2px 4px rgba(0,0,0,0.1);
+                padding:15px;
+                position:relative;
+            }
+            .single-product-images, .single-product-info {
+                width:100%;
+            }
+            .main-image img {
+                width:100%;
+                height:auto;
+                border-radius:3px;
+                object-fit:cover;
+            }
+            .featured-label {
+                position:absolute;
+                top:10px;
+                left:10px;
+                background:#E91E63;
+                color:#fff;
+                font-size:0.7em;
+                padding:3px 6px;
+                border-radius:3px;
+                z-index:2;
+            }
+            .thumbnails {
+                display:flex;
+                margin-top:5px;
+                gap:5px;
+                overflow-x:auto;
+            }
+            .thumbnail-img {
+                width:50px;
+                height:50px;
+                object-fit:cover;
+                border:1px solid #ddd;
+                border-radius:3px;
+                cursor:pointer;
+            }
+            .product-title {
+                font-size:1.1em;
+                margin:0 0 10px 0;
+                color:#333;
+                font-weight:bold;
+            }
+            .rrp-price {
+                font-size:0.9em;
+                color:#999;
+                margin:5px 0;
+                text-decoration:line-through;
+            }
+            .final-price {
+                font-size:0.9em;
+                color:#333;
+                margin:5px 0;
+                font-weight:bold;
+            }
+            .stock-info {
+                margin:5px 0;
+                font-size:0.9em;
+                color:#4CAF50;
+            }
+            .out-of-stock-message {
+                color:#a94442;
+                font-weight:bold;
+                font-size:0.9em;
+            }
+            .product-meta, .product-room, .public-remark, .suppliers-note, .product-sku, .seats-reference {
+                font-size:0.9em;
+                color:#666;
+                margin:5px 0;
+            }
+            .seats-reference {
+                font-size:0.9em;
+                color:#555;
+                margin:5px 0;
+            }
+            .add-to-cart-btn {
+                background:#FFC107;
+                color:#333;
+                border:none;
+                padding:5px 10px;
+                border-radius:3px;
+                font-size:0.9em;
+                cursor:pointer;
+                white-space:nowrap;
+            }
+            .add-to-cart-btn:hover {
+                background:#ffb300;
+            }
+
+            /* Hide Prices Toggle Styles */
+            .hide-prices-container {
+                margin-left: 20px;
+                display: flex;
+                align-items: center;
+                gap: 5px;
+            }
+            
+            .switch {
+                position: relative;
+                display: inline-block;
+                width: 50px;
+                height: 24px;
+            }
+            
+            .switch input {
+                opacity: 0;
+                width: 0;
+                height: 0;
+            }
+            
+           .slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background-color: #ccc;
+                transition: .4s;
+                border-radius: 24px;
+            }
+            
+            .slider:before {
+                position: absolute;
+                content: "";
+                height: 18px;
+                width: 18px;
+                left: 3px;
+                bottom: 3px;
+                background-color: white;
+                transition: .4s;
+                border-radius: 50%;
+            }
+            
+            input:checked + .slider {
+                background-color: #4285f4;
+            }
+            
+            input:focus + .slider {
+                box-shadow: 0 0 1px #4285f4;
+            }
+            
+            input:checked + .slider:before {
+                transform: translateX(26px);
+            }
+            
+            .switch-label {
+                font-size: 0.8em;
+                color: #333;
+                user-select: none;
+            }
+          /* Hide Prices Functionality */
+.hide-prices .final-price,
+.hide-prices .rrp-price {
+    display: none;
+}
+
+/* Hide prices and quantity for non-logged-in users */
+body:not(.logged-in) .product-price-range,
+body:not(.logged-in) .list-price,
+body:not(.logged-in) .partner-price,
+body:not(.logged-in) .product-quantity {
+    display: none !important;
+}
+            
+/* Hide quantity and add to cart button for non-logged in users */
+body:not(.logged-in) .product-quantity,
+body:not(.logged-in) input[type="number"][name="quantity"],
+body:not(.logged-in) button[name="add_custom_product_to_cart"],
+body:not(.logged-in) .add-to-cart-btn,
+body:not(.logged-in) .button.add-to-cart-btn,
+body:not(.logged-in) button.add-to-cart-btn,
+body:not(.logged-in) form input[name="quantity"],
+body:not(.logged-in) .button.button-primary[name="add_custom_product_to_cart"],
+body:not(.logged-in) form button[type="submit"],
+body:not(.logged-in) .add-to-cart-form {
+    display: none !important;
+}
+
+/* This will specifically target the elements shown in your screenshot */
+body:not(.logged-in) input[name="quantity"][min="1"],
+body:not(.logged-in) button.add-to-cart-btn {
+    display: none !important;
+}
+
+/* Hide the entire form if needed */
+body:not(.logged-in) form[method="post"] {
+    display: none !important;
+}
+
+
+/* Hide prices and quantity for non-logged-in users */
+body:not(.logged-in) .product-price-range,
+body:not(.logged-in) .list-price,
+body:not(.logged-in) .partner-price,
+body:not(.logged-in) .product-quantity,
+body:not(.logged-in) .final-price,     /* Add this */
+body:not(.logged-in) .rrp-price {      /* Add this */
+    display: none !important;
+}
+
+
+
+
+
+
+/* Responsive adjustments */
+            @media(min-width:480px) {
+                .single-product-images {
+                    width:40%;
+                    padding-right:15px;
+                    box-sizing:border-box;
+                }
+                .single-product-info {
+                    width:60%;
+                    padding-left:15px;
+                    box-sizing:border-box;
+                }
+            }
+        </style>';
+
+        // Add JavaScript for Hide Prices Toggle
+        $output .= '<script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const hidePricesToggle = document.getElementById("hide-prices-toggle");
+            const rightContent = document.getElementById("right-content");
+
+            // Initialize toggle based on localStorage
+            if (localStorage.getItem("hidePrices") === "true") {
+                hidePricesToggle.checked = true;
+                rightContent.classList.add("hide-prices");
+            }
+
+            hidePricesToggle.addEventListener("change", function() {
+                if (this.checked) {
+                    rightContent.classList.add("hide-prices");
+                    localStorage.setItem("hidePrices", "true");
+                } else {
+                    rightContent.classList.remove("hide-prices");
+                    localStorage.setItem("hidePrices", "false");
+                }
+            });
+        });
+        </script>';
+		
+	//test999
+		/*
+// ====== Added: Virtual Scrolling Implementation ======
+$output .= '<script>
+document.addEventListener("DOMContentLoaded", function() {
+  const productsContainer = document.querySelector(".products-list");
+  const productItems = Array.from(productsContainer.querySelectorAll(".product-item"));
+  const itemHeight = productItems[0]?.offsetHeight || 200; // Fallback height
+  
+  // Create placeholders for items
+  productItems.forEach(item => {
+    item.dataset.originalIndex = productItems.indexOf(item);
+    item.style.height = itemHeight + "px";
+  });
+  
+  // Initially hide products outside viewport + buffer
+  function updateVisibleProducts() {
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + window.innerHeight;
+    const buffer = window.innerHeight * 2; // 2x viewport as buffer
+    
+    productItems.forEach(item => {
+      const itemTop = item.offsetTop;
+      const itemBottom = itemTop + itemHeight;
+      
+      // Check if item is within viewport + buffer
+      if (itemBottom >= viewportTop - buffer && itemTop <= viewportBottom + buffer) {
+        if (item.classList.contains("virtual-hidden")) {
+          item.classList.remove("virtual-hidden");
+        }
+      } else {
+        if (!item.classList.contains("virtual-hidden")) {
+          item.classList.add("virtual-hidden");
+        }
+      }
+    });
+  }
+  
+  // Add CSS rule for hidden items
+  const style = document.createElement("style");
+  style.textContent = `
+    .virtual-hidden {
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Update visible products on scroll with throttling
+  let scrollTimeout;
+  window.addEventListener("scroll", function() {
+    if (!scrollTimeout) {
+      scrollTimeout = setTimeout(function() {
+        updateVisibleProducts();
+        scrollTimeout = null;
+      }, 100); // Throttle to 100ms
+    }
+  });
+  
+  // Update on resize with debouncing
+  let resizeTimeout;
+  window.addEventListener("resize", function() {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(updateVisibleProducts, 200);
+  });
+  
+  // Initial update
+  updateVisibleProducts();
+});
+</script>';
+
+*/
+//test999
+//
+//
+//
+//test999a
+// ====== Added: Progressive Grid Layout Manager ======
+$output .= '<script>
+document.addEventListener("DOMContentLoaded", function() {
+  // Initialize elements
+  const productsContainer = document.querySelector(".products-list");
+  
+  // If no products container found, exit
+  if (!productsContainer) return;
+  
+  const productItems = Array.from(productsContainer.querySelectorAll(".product-item"));
+  if (!productItems.length) return;
+
+  // Hide container initially for smoothness
+  productsContainer.style.visibility = "hidden";
+  
+  // Global settings
+  const config = {
+    rowDetectionThreshold: 2, // px - tolerance for detecting items in same row
+    batchSize: 5,             // Number of rows to process in each batch
+    bufferRows: 3,            // Additional rows to process beyond viewport
+    throttleDelay: 100,       // ms - delay for throttling resize events
+    initialDelay: 10          // ms - initial delay to ensure DOM is ready
+  };
+  
+  // Add basic styling to prevent extreme layout shifts
+  const style = document.createElement("style");
+  style.textContent = `
+    .product-item {
+      min-height: 220px;
+      transition: height 0.2s ease-out;
+    }
+    .product-item h2 {
+      height: 2.4em;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      white-space: normal;
+    }
+    .product-item img {
+      height: 100px;
+      object-fit: cover;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  // Group products by row
+  function getProductRows() {
+    const rows = {};
+    productItems.forEach(item => {
+      // Reset height before measuring to get natural height relationships
+      item.style.height = "";
+      
+      // Get position after reset
+      const rect = item.getBoundingClientRect();
+      const rowPosition = Math.floor(rect.top);
+      
+      // Group by row position with small threshold to handle floating point differences
+      const existingRowPositions = Object.keys(rows).map(Number);
+      const existingRow = existingRowPositions.find(pos => 
+        Math.abs(pos - rowPosition) < config.rowDetectionThreshold
+      );
+      
+      const rowKey = existingRow !== undefined ? existingRow : rowPosition;
+      
+      if (!rows[rowKey]) rows[rowKey] = [];
+      rows[rowKey].push(item);
+    });
+    
+    // Convert to array of rows, sorted by position
+    return Object.values(rows).sort((a, b) => {
+      return a[0].getBoundingClientRect().top - b[0].getBoundingClientRect().top;
+    });
+  }
+  
+  // Get visible rows within viewport plus buffer
+  function getVisibleRowIndices(rows) {
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + window.innerHeight;
+    const visibleIndices = [];
+    
+    rows.forEach((row, index) => {
+      // Use the first item in each row for position reference
+      const rect = row[0].getBoundingClientRect();
+      const rowTop = rect.top + window.scrollY;
+      const rowBottom = rowTop + rect.height;
+      
+      // Check if row is visible or within buffer
+      if (
+        (rowBottom >= viewportTop - (config.bufferRows * rect.height)) && 
+        (rowTop <= viewportBottom + (config.bufferRows * rect.height))
+      ) {
+        visibleIndices.push(index);
+      }
+    });
+    
+    return visibleIndices;
+  }
+  
+  // Process rows in batches to prevent blocking UI
+  function processRowsProgressively(rows, startIndex = 0, endIndex = rows.length - 1) {
+    // Process a limited batch of rows
+    let currentIndex = startIndex;
+    const endBatchIndex = Math.min(startIndex + config.batchSize - 1, endIndex);
+    
+    for (let i = currentIndex; i <= endBatchIndex; i++) {
+      const row = rows[i];
+      if (!row) continue;
+      
+      // Find the maximum natural height in this row
+      const maxHeight = Math.max(...row.map(item => item.offsetHeight));
+      
+      // Set all items in the row to the maximum height
+      row.forEach(item => {
+        item.style.height = maxHeight + "px";
+      });
+    }
+    
+    // Continue with next batch if there are more rows to process
+    if (endBatchIndex < endIndex) {
+      setTimeout(() => {
+        processRowsProgressively(rows, endBatchIndex + 1, endIndex);
+      }, 0); // Use setTimeout with 0ms to yield to browser\'s rendering
+    }
+  }
+  
+  // Main function to equalize heights
+  function equalizeRowHeights(processAll = false) {
+    // Get rows
+    const rows = getProductRows();
+    
+    if (processAll) {
+      // Process all rows (e.g., on initial load)
+      processRowsProgressively(rows);
+    } else {
+      // Process only visible rows + buffer
+      const visibleIndices = getVisibleRowIndices(rows);
+      if (visibleIndices.length > 0) {
+        processRowsProgressively(rows, Math.min(...visibleIndices), Math.max(...visibleIndices));
+      }
+    }
+  }
+  
+  // Throttle function for resize events
+  function throttle(func, delay) {
+    let lastCall = 0;
+    return function(...args) {
+      const now = new Date().getTime();
+      if (now - lastCall < delay) return;
+      lastCall = now;
+      return func(...args);
+    };
+  }
+  
+  // Set up event handlers
+  let resizeTimeout;
+  window.addEventListener("resize", throttle(() => {
+    clearTimeout(resizeTimeout);
+    // Reset heights first
+    productItems.forEach(item => item.style.height = "");
+    
+    // Delay slightly to avoid rapid consecutive resizes
+    resizeTimeout = setTimeout(() => {
+      equalizeRowHeights(true);
+    }, config.throttleDelay);
+  }, config.throttleDelay));
+  
+  // Add scroll handler to equalize newly visible rows
+  window.addEventListener("scroll", throttle(() => {
+    equalizeRowHeights(false);
+  }, config.throttleDelay * 2));
+  
+  // Initial equalization
+  setTimeout(() => {
+    equalizeRowHeights(true);
+    productsContainer.style.visibility = "visible";
+    
+    // After initial load, run one more time to catch any missed rows
+    setTimeout(() => {
+      equalizeRowHeights(true);
+    }, 500);
+  }, config.initialDelay);
+});
+</script>';
+// ================================================
+// ================================================
+        return $output;
+    }
+}
+
+// FIXED SUPPORT FUNCTIONS
+// Fixed search form function with explicit action URL
+if (!function_exists('get_products_search_form_fixed')) {
+    function get_products_search_form_fixed($search_query, $selected_brand, $room_id, $is_featured, $sales, $products_page_url) {
+        $output = '<div class="products-search-form">';
+        // Add an ID for clarity if needed
+        $output .= '<form method="get" action="'.esc_url($products_page_url).'" style="display:flex; align-items:center; border:1px solid #4285f4; border-radius:20px; background:#fff; height:36px; line-height:36px; width:100%; box-sizing:border-box;">';
+        
+        // Keep important filter parameters consistent across all forms
+        $preserve_params = array('room_id', 'is_featured', 'sales', 'brand_filter', 'category_filter', 'display_filter');
+        
+        // Only preserve existing parameters that aren't going to be set by the form itself
+        foreach ($_GET as $key => $value) {
+            if (!in_array($key, array('search_query', 'paged')) && !in_array($key, $preserve_params)) {
+                $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+            }
+        }
+              
+        // Add filter parameters only if they're not already in the URL
+        if (!empty($room_id) && !isset($_GET['room_id'])) {
+            $output .= '<input type="hidden" name="room_id" value="' . esc_attr($room_id) . '">';
+        }
+        if (!empty($is_featured) && !isset($_GET['is_featured'])) {
+            $output .= '<input type="hidden" name="is_featured" value="' . esc_attr($is_featured) . '">';
+        }
+        if (!empty($sales) && !isset($_GET['sales'])) {
+            $output .= '<input type="hidden" name="sales" value="' . esc_attr($sales) . '">';
+        }
+        // Preserve selected brand if set explicitly (not from URL)
+        if (!empty($selected_brand) && !isset($_GET['brand_filter'])) {
+            $output .= '<input type="hidden" name="brand_filter" value="' . esc_attr($selected_brand) . '">';
+        }
+
+        $output .= '<input type="text" name="search_query" placeholder="search" value="' . esc_attr($search_query) . '" style="border:none; outline:none; font-size:0.9em; padding:0 10px; flex:1; height:100%; color:#333; background:transparent;">';
+        $output .= '<input type="submit" value="搜索" style="border:none; background:#4285f4; color:#fff; font-size:0.85em; padding:0 15px; cursor:pointer; height:100%; border-top-right-radius:20px; border-bottom-right-radius:20px;">';
+        $output .= '</form>';
+        $output .= '</div>';
+        return $output;
+    }
+}
+
+// Fixed display filter with explicit action URL
+if (!function_exists('get_products_display_filter_fixed')) {
+    function get_products_display_filter_fixed($current_filter, $products_page_url) {
+        $options = [
+            'price_stock' => '仅显示有价格和库存的产品',
+            'all'         => '显示所有'
+        ];
+
+        // Build form wrapper - we'll need a form for the onchange to work properly
+        $output = '<form method="get" action="'.esc_url($products_page_url).'" class="filter-form">';
+        
+        // Preserve existing parameters
+        foreach ($_GET as $key => $value) {
+            if ($key != 'display_filter' && $key != 'paged') {
+                $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+            }
+        }
+
+        $output .= '<div class="filter-item">';
+        $output .= '<label for="display_filter_select" class="filter-label"><span class="filter-icon">📊</span>过滤选项:</label>';
+        $output .= '<select name="display_filter" id="display_filter_select" onchange="this.form.submit()" class="filter-select">';
+        foreach ($options as $value => $label) {
+            $selected = ($current_filter === $value) ? 'selected' : '';
+            $output .= '<option value="' . esc_attr($value) . '" ' . $selected . '>' . wp_kses_post($label) . '</option>';
+        }
+        $output .= '</select>';
+        $output .= '</div>';
+        $output .= '</form>';
+
+        return $output;
+    }
+}
+
+// Fixed category filter with explicit action URL
+if (!function_exists('get_products_category_filter_fixed')) {
+    function get_products_category_filter_fixed($current_category, $products_page_url) {
+        global $wpdb;
+        $master_products_table = $wpdb->prefix . 'master_products';
+        $categories = $wpdb->get_col("SELECT DISTINCT product_category FROM $master_products_table WHERE product_category<>'' ORDER BY product_category ASC");
+
+        // Add CSS styles with media queries
+        $output = '<style>
+            .cuban-button-container {
+                margin-bottom: 8px;
+                width: 100%;
+                max-width: 100%;
+                padding: 0 5px;
+                box-sizing: border-box;
+            }
+            .cuban-button {
+                display: block;
+                width: 100%;
+                padding: 6px 8px;
+                border-radius: 5px;
+                font-size: 0.6em;
+                letter-spacing: 0.02em;
+                cursor: pointer;
+                text-decoration: none;
+                text-align: center;
+                font-weight: bold;
+                transition: all 0.3s ease;
+                box-sizing: border-box;
+                font-family: Arial, sans-serif;
+                text-transform: uppercase;
+            }
+            @media (min-width: 480px) {
+                .cuban-button-container {
+                    padding: 0 10px;
+                }
+                .cuban-button {
+                    font-size: 0.6em;
+                    padding: 4px 6px;
+                }
+            }
+            @media (min-width: 768px) {
+                .cuban-button-container {
+                    padding: 0 15px;
+                }
+                .cuban-button {
+                    font-size: 0.7em;
+                    padding: 10px 15px;
+                }
+            }
+            @media (min-width: 1024px) {
+                .cuban-button-container {
+                    padding: 0 20px;
+                }
+                .cuban-button {
+                    font-size: 0.9em;
+                    padding: 12px 20px;
+                }
+            }
+        </style>';
+
+        // Create the direct Cuban category button - with proper URL handling
+        $cuban_url = add_query_arg(['category_filter' => urlencode('Cuban 古巴 | PCC'), 'paged' => null], $products_page_url);
+        $is_cuban_active = ($current_category === 'Cuban 古巴 | PCC');
+        
+        $output .= '<div class="cuban-button-container">';
+        $output .= '<a href="' . esc_url($cuban_url) . '" class="cuban-button" style="' . 
+            ($is_cuban_active 
+                ? 'background: #D4AF37; color: #000000; border: 2px solid #000000; text-shadow: 0 1px 1px rgba(255,255,255,0.3);' 
+                : 'background: #000000; color: #D4AF37; border: 2px solid #D4AF37; text-shadow: 0 1px 1px rgba(0,0,0,0.3);') 
+            . '">Cuban 古巴 | PCC</a>';
+        $output .= '</div>';
+
+        // Original category dropdown - wrap in form for onchange to work
+        $output .= '<form method="get" action="'.esc_url($products_page_url).'" class="filter-form">';
+        
+        // Preserve existing parameters except those that will be set by this form
+        foreach ($_GET as $key => $value) {
+            if ($key != 'category_filter' && $key != 'paged') {
+                $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+            }
+        }
+        
+        $output .= '<div class="filter-item">';
+        $output .= '<label for="category_filter_select" class="filter-label"><span class="filter-icon">📁</span>分类过滤:</label>';
+        $output .= '<select name="category_filter" id="category_filter_select" onchange="this.form.submit()" class="filter-select">';
+        $output .= '<option value="">所有分类</option>';
+        foreach ($categories as $category) {
+            $selected = ($current_category === $category) ? 'selected' : '';
+            $output .= '<option value="' . esc_attr($category) . '" ' . $selected . '>' . wp_kses_post($category) . '</option>';
+        }
+        $output .= '</select>';
+        $output .= '</div>';
+        $output .= '</form>';
+
+        return $output;
+    }
+}
+
+// Fixed brands menu with explicit action URL
+if (!function_exists('get_brands_menu_fixed')) {
+    function get_brands_menu_fixed($selected_brand, $products_page_url) {
+        global $wpdb;
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+        $master_products_table = $wpdb->prefix . 'master_products';
+        
+        // Get supplier filter if applicable
+        $supplier_filter = '';
+        $supplier_ids = xwz_get_allowed_supplier_ids();
+        if (!empty($supplier_ids)) {
+            $supplier_filter = " AND s.seller_id IN ($supplier_ids)";
+        }
+        
+        // Simple count query - count unique SKUs with price and quantity > 0
+        $count_query = "
+            SELECT m.brand, COUNT(DISTINCT m.sku) as product_count
+            FROM $master_products_table m
+            INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+            WHERE s.is_visible = 1 
+            AND s.quantity > 0 
+            AND s.partner_price > 0
+            AND m.brand != ''
+            $supplier_filter
+            GROUP BY m.brand
+            ORDER BY product_count DESC, m.brand ASC
+        ";
+        
+        // Get counts directly ordered by count
+        $brands_with_counts = $wpdb->get_results($count_query);
+        
+        // Start building output
+        $output = '<div id="brand-menu">';
+        $output .= '<h3>品牌列表 (按产品数量排序)</h3>';
+        
+        // Add Search Input
+        $output .= '<input type="text" id="brand-search" placeholder="搜索品牌" style="width: 90%; padding: 5px; margin: 10px auto; display: block; border: 1px solid #ccc; border-radius: 4px;">';
+
+        $output .= '<ul id="brands-list">';
+        
+        // "All Brands" link - properly preserve other parameters
+        $all_brands_url = remove_query_arg(['brand_filter', 'paged'], $products_page_url);
+        $all_active = (empty($selected_brand)) ? 'class="active"' : '';
+        $output .= '<li><a href="' . esc_url($all_brands_url) . '" ' . $all_active . '>所有品牌</a></li>';
+
+        // Separator
+        $output .= '<li style="border-bottom:1px solid #ddd;"></li>';
+
+        // Display brands with counts
+        foreach ($brands_with_counts as $brand_data) {
+            $name = $brand_data->brand;
+            $count = $brand_data->product_count;
+            
+            // Skip brands with no products
+            if ($count == 0) continue;
+            
+            // Properly preserve other parameters while setting brand filter
+            $brand_url = add_query_arg(['brand_filter' => urlencode($name), 'paged' => null], $products_page_url);
+            $active_class = ($name == $selected_brand) ? 'class="active"' : '';
+
+            // Insert <br> after first space for better formatting
+            $name_parts = preg_split('/\s+/', $name, 2);
+            if (count($name_parts) === 2) {
+                $display_name = esc_html($name_parts[0]) . '<br>' . esc_html($name_parts[1]);
+            } else {
+                $display_name = esc_html($name);
+            }
+
+            $output .= '<li><a href="' . esc_url($brand_url) . '" ' . $active_class . '>' . 
+                       wp_kses_post($display_name) . ' <span class="count">(' . $count . ')</span></a></li>';
+        }
+
+        $output .= '</ul></div>';
+
+        // Add CSS for count display
+        $output .= '<style>
+        #brand-menu .count {
+            font-size: 0.8em;
+            color: #666;
+            font-weight: normal;
+        }
+        #brand-menu a {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-right: 8px;
+        }
+        #brand-menu a span.count {
+            margin-left: 4px;
+            white-space: nowrap;
+        }
+        </style>';
+
+        // Add JavaScript for filtering
+        $output .= '
+        <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const searchInput = document.getElementById("brand-search");
+            const brandList = document.getElementById("brands-list");
+            const brands = brandList.getElementsByTagName("li");
+
+            searchInput.addEventListener("keyup", function() {
+                const filter = searchInput.value.toLowerCase();
+                for (let i = 0; i < brands.length; i++) {
+                    const a = brands[i].getElementsByTagName("a")[0];
+                    if (a) {
+                        const txtValue = a.textContent || a.innerText;
+                        if (txtValue.toLowerCase().includes(filter)) {
+                            brands[i].style.display = "";
+                        } else {
+                            brands[i].style.display = "none";
+                        }
+                    }
+                }
+            });
+        });
+        </script>
+        ';
+
+        return $output;
+    }
+}
+//test999
+
+/* THIS IS THE ID AND NAME (268) xx front page single product 3 */
+// ================================
+// FRONTEND SHORTCODES AND FUNCTIONS 
+// (Ensuring we use a dummy Woo ID=1371, but store actual row_id from custom table)
+// ================================
+/**
+ * Get adjusted list price based on user rules
+ */
+
+/**
+ * Old method: Clean the photo URL by removing everything starting at " !"
+ */
+if (!function_exists('M_xwz_clean_photo_url')) {
+    function M_xwz_clean_photo_url($url) {
+        $pos = strpos($url, ' !');
+        if ($pos !== false) {
+            $url = substr($url, 0, $pos);
+        }
+        return trim($url);
+    }
+}
+
+/**
+ * Hook for dynamic price adjustments (if needed)
+ */
+/*
+if (!function_exists('M_xwz_get_adjusted_price')) {
+    function M_xwz_get_adjusted_price($original_price, $price_type, $sku, $seller_id, $room_id) {
+        // Adjust as needed. Currently just returns the original
+        return $original_price;
+    }
+}*/
+
+/**
+ * Add a display filter dropdown to the products list page
+ */
+if (!function_exists('get_products_display_filter')) {
+    function get_products_display_filter($current_filter) {
+        $options = [
+            'price_stock' => '仅显示有价格和库存的产品',
+            'all'         => '显示所有'
+        ];
+
+        $output = '<div class="filter-item">';
+        $output .= '<label for="display_filter_select" class="filter-label"><span class="filter-icon">📊</span>过滤选项:</label>';
+        $output .= '<select name="display_filter" id="display_filter_select" onchange="this.form.submit()" class="filter-select">';
+        foreach ($options as $value => $label) {
+            $selected = ($current_filter === $value) ? 'selected' : '';
+            $output .= '<option value="' . esc_attr($value) . '" ' . $selected . '>' . wp_kses_post($label) . '</option>';
+        }
+        $output .= '</select>';
+        $output .= '</div>';
+
+        return $output;
+    }
+}
+
+/**
+ * Add a category filter dropdown to the products list page
+ */
+if (!function_exists('get_products_category_filter')) {
+    function get_products_category_filter($current_category) {
+        global $wpdb;
+        $master_products_table = $wpdb->prefix . 'master_products';
+        $categories = $wpdb->get_col("SELECT DISTINCT product_category FROM $master_products_table WHERE product_category<>'' ORDER BY product_category ASC");
+
+        // Add CSS styles with media queries
+        $output = '<style>
+            .cuban-button-container {
+                margin-bottom: 8px;
+                width: 100%;
+                max-width: 100%;
+                padding: 0 5px;
+                box-sizing: border-box;
+            }
+            .cuban-button {
+                display: block;
+                width: 100%;
+                padding: 6px 8px;
+                border-radius: 5px;
+                font-size: 0.6em;
+                letter-spacing: 0.02em;
+                cursor: pointer;
+                text-decoration: none;
+                text-align: center;
+                font-weight: bold;
+                transition: all 0.3s ease;
+                box-sizing: border-box;
+                font-family: Arial, sans-serif;
+                text-transform: uppercase;
+            }
+            @media (min-width: 480px) {
+                .cuban-button-container {
+                    padding: 0 10px;
+                }
+                .cuban-button {
+                    font-size: 0.6em;
+                    padding: 4px 6px;
+                }
+            }
+            @media (min-width: 768px) {
+                .cuban-button-container {
+                    padding: 0 15px;
+                }
+                .cuban-button {
+                    font-size: 0.7em;
+                    padding: 10px 15px;
+                }
+            }
+            @media (min-width: 1024px) {
+                .cuban-button-container {
+                    padding: 0 20px;
+                }
+                .cuban-button {
+                    font-size: 0.9em;
+                    padding: 12px 20px;
+                }
+            }
+        </style>';
+
+        // Create the direct Cuban category button
+   $current_url = remove_query_arg(['category_filter', 'paged', 'search_query']);
+        $cuban_url = add_query_arg('category_filter', urlencode('Cuban 古巴 | PCC'), $current_url);
+        $is_cuban_active = ($current_category === 'Cuban 古巴 | PCC');
+        
+        $output .= '<div class="cuban-button-container">';
+        $output .= '<a href="' . esc_url($cuban_url) . '" class="cuban-button" style="' . 
+            ($is_cuban_active 
+                ? 'background: #D4AF37; color: #000000; border: 2px solid #000000; text-shadow: 0 1px 1px rgba(255,255,255,0.3);' 
+                : 'background: #000000; color: #D4AF37; border: 2px solid #D4AF37; text-shadow: 0 1px 1px rgba(0,0,0,0.3);') 
+            . '">Cuban 古巴 | PCC</a>';
+        $output .= '</div>';
+
+        // Original category dropdown
+        $output .= '<div class="filter-item">';
+        $output .= '<label for="category_filter_select" class="filter-label"><span class="filter-icon">📁</span>分类过滤:</label>';
+        $output .= '<select name="category_filter" id="category_filter_select" onchange="this.form.submit()" class="filter-select">';
+        $output .= '<option value="">所有分类</option>';
+        foreach ($categories as $category) {
+            $selected = ($current_category === $category) ? 'selected' : '';
+            $output .= '<option value="' . esc_attr($category) . '" ' . $selected . '>' . wp_kses_post($category) . '</option>';
+        }
+        $output .= '</select>';
+        $output .= '</div>';
+
+        return $output;
+    }
+}
+
+/**
+ * Search form function
+ *
+ * **MODIFICATION**: We remove brand_filter from the hidden fields, so
+ * when the user presses search, the brand is automatically reset to "all."
+ */
+if (!function_exists('get_products_search_form')) {
+    function get_products_search_form($search_query, $selected_brand, $room_id, $is_featured, $sales) {
+        $output = '<div class="products-search-form">';
+        // Add an ID for clarity if needed
+        $output .= '<form method="get" style="display:flex; align-items:center; border:1px solid #4285f4; border-radius:20px; background:#fff; height:36px; line-height:36px; width:100%; box-sizing:border-box;">';
+  // Don't preserve any filters - make search site-wide
+// We only keep non-filter parameters (like page-specific ones)
+foreach ($_GET as $key => $value) {
+    if (!in_array($key, array('search_query', 'paged', 'sku', 'id', 'brand_filter', 'category_filter', 'display_filter'))) {
+        $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+    }
+}
+      
+        if (!empty($room_id) && !isset($_GET['room_id'])) {
+            $output .= '<input type="hidden" name="room_id" value="' . esc_attr($room_id) . '">';
+        }
+        if (!empty($is_featured) && !isset($_GET['is_featured'])) {
+            $output .= '<input type="hidden" name="is_featured" value="' . esc_attr($is_featured) . '">';
+        }
+        if (!empty($sales) && !isset($_GET['sales'])) {
+            $output .= '<input type="hidden" name="sales" value="' . esc_attr($sales) . '">';
+        }
+        // We intentionally omit brand_filter to ensure it resets to "all" on search
+
+        $output .= '<input type="text" name="search_query" placeholder="search" value="' . esc_attr($search_query) . '" style="border:none; outline:none; font-size:0.9em; padding:0 10px; flex:1; height:100%; color:#333; background:transparent;">';
+        $output .= '<input type="submit" value="搜索" style="border:none; background:#4285f4; color:#fff; font-size:0.85em; padding:0 15px; cursor:pointer; height:100%; border-top-right-radius:20px; border-bottom-right-radius:20px;">';
+        $output .= '</form>';
+        $output .= '</div>';
+        return $output;
+    }
+}
+
+/**
+ * Add a brands menu to the products list page with a search filter
+ *
+ * **MODIFICATION**: Clicking a brand now clears search_query, ensuring
+ * that the search content is removed when picking a new brand.
+ */
+
+//test 400
+/*
+if (!function_exists('get_brands_menu')) {
+    function get_brands_menu($selected_brand) {
+        global $wpdb;
+
+   $hardcoded_names = [
+    // Tier 1 - Cuban Heritage Brands (Most Prestigious)
+    '高希霸 Cohiba',
+    '蒙特 Montecristo',
+    '优民 Upmann',
+    '帕特加斯 Partagas',
+    '罗密欧 Romeo y Julieta',
+    '好友 Hoyo De Monterrey',
+    '潘趣 Punch',
+    '千里达 Trinidad',
+    '玻利瓦尔 Boliva',
+    '雷蒙阿隆尼 Ramon Allones',
+    '拉斐尔 Rafael Gonzalez',
+
+    // Tier 2 - Premium Non-Cuban Global Brands
+    '大卫杜夫 DAVIDOFF',
+    '阿图罗·富恩特 ARTURO FUENTE',
+  
+    '我的父亲 MY FATHER',
+    
+    '奥利瓦 OLIVA',
+   
+    // Tier 3 - Traditional Cuban Brands
+    '丰塞卡 Fonseca',
+  
+    '世界之王 El Rey Del Mundo',
+    '圣克里斯多 San Cristobal De La Habana',
+    '外交官 Diplomaticos',
+    '桑丘潘萨 Sancho Panza',
+
+
+    // Tier 4 - Premium Contemporary Brands
+    '多米尼加之花 LA FLOR DOMINICANA',
+    '洛基·帕特尔 ROCKY PATEL',
+    '德鲁庄园 DREW ESTATE',
+    '塔图 TATUAJE',
+    '卡马乔 CAMACHO',
+    'AVO',
+    '佩尔多莫 PERDOMO',
+    'E.P. 卡里洛 E.P. CARRILLO',
+
+    // Tier 5 - Mid-Range Cuban Brands
+    '金特罗 Quintero',
+    '库阿巴 Cuaba',
+    '圣路易斯雷伊 Saint Luis Rey',
+    '威古洛 Vegueros',
+    '波尔拉腊尼加 Por Larranaga',
+    '胡安佩洛斯 Juan Lopez',
+    '多尔塞码头 Quai d Orsay',
+
+    // Tier 6 - Contemporary Premium and Boutique Brands
+    '麦克纽杜 MACANUDO',
+    '克里斯托弗 KRISTOFF',
+    '拿铁利 LA TELIER',
+    '帕拉森 PLASENCIA',
+    '钻冠 DIAMOND CROWN',
+    '钻冠 凯萨大帝 DIAMOND CROWN JULIUS CAESER',
+    '钻冠 马克西姆斯 DIAMOND CROWN MAXIMUS',
+    'CAO',
+    'AGING ROOM',
+    'C.L.E',
+    'DUNBARTON TOBACCO & TRUST DTT',
+	     '阿什顿 ASHTON',
+    'OPUS X',
+    '帕德龙 PADRÓN',
+'AJ 费尔南德斯 AJ FERNANDEZ',
+    '登喜路 DUNHILL',
+	    '尼加拉瓜珍宝 JOYA DE NICARAGUA',
+  '古巴荣耀 La Gloria Cubana',
+	       '维嘉斯罗宾纳 VegasRobaina',
+    // Remaining Brands (Alphabetically ordered by English name)
+    '1502',
+    '537',
+    '阿拉丁 ALADINO',
+    '艾赞 AZAN',
+    '巴顿 EL BATON',
+    '埃芬巴 ALFAMBRA',
+    '大都会 CAPITOL',
+    '卡萨德加西亚 CASA DE GARCIA',
+    '卡萨尼加 CASA NICARAGUA',
+    '卡萨图伦 CASA TURRENT',
+    '精选 Combinaciones',
+    '昆佩 CUMPAY',
+    '当·迪亚哥 DONDIEGO',
+    '多米尼克‧卡彭 DOMINIC CAPONE',
+    '多米尼加庄园 DOMINICAN ESTATES',
+    '科潘之花 FLOR DE COPAN',
+    '塞尔瓦之花 FLOR DE SELVA',
+    '基地 FOUNDATION',
+    '火神 GOD OF FIRE',
+    '哈瓦那 GRAN HABANO',
+    
+    '关塔那美拉 Guantanamera',
+    '胜得美 HOLY FROM MIANA',
+    '奥拉西奥 HORACIO',
+    '黄鹤楼 HUANG HE LOU',
+    '比亚达 JoseLPiedra',
+    '狮子王 拉奥罗拉 LA AURORA',  
+    '古巴芬芳 LA AROMA DEL CARIBE',
+    '拉弗洛尔．德卡诺 La flor de Cano',
+    '兰珀特 LAMPERT',
+    '拉特洛伊亚 LATROYA',
+    '里昂 吉梅斯 LEON JIMENES',
+    '路易马丁 LUIS MARTINEZ',
+    '帕拉迪索 PARADISO',
+    '碧海名珠 PERLA DEL MAR',
+    '花花公子 PLAYBOY',
+    '普林斯普 PRINCIPES',
+    '克萨达 QUESADA',
+    '王者之峰 CUESTAREY',
+    '砖家 BRICKHOUSE',
+    '西蒙贝尔特雷 SIMON BELTRE',
+    '特-阿莫 TE-AMO',
+    '唐·托马斯 DONTOMAS',
+    '华伦天奴 VALENTINO SIESTO',
+    '唯佳 VEGAFINA',
+    '维京人 VIKING',
+    '维拉 VILLA ZAMORANO',
+    '威力加 VILLIGER',
+    '茄卷 WARPED',
+    '季诺 ZINO'
+];
+        $master_products_table = $wpdb->prefix . 'master_products';
+        $brands = $wpdb->get_col("SELECT DISTINCT brand FROM $master_products_table WHERE brand<>'' ORDER BY brand ASC");
+        $brands = array_diff($brands, $hardcoded_names);
+
+        // Remove brand_filter and search_query from current URL
+        $current_url = remove_query_arg(['brand_filter', 'search_query']);
+        
+        $output = '<div id="brand-menu">';
+        $output .= '<h3>品牌列表</h3>';
+        
+        // Add Search Input
+        $output .= '<input type="text" id="brand-search" placeholder="搜索品牌" style="width: 90%; padding: 5px; margin: 10px auto; display: block; border: 1px solid #ccc; border-radius: 4px;">';
+
+        $output .= '<ul id="brands-list">';
+        
+        // "All Brands" link
+        $all_active = (empty($selected_brand)) ? 'class="active"' : '';
+        $output .= '<li><a href="' . esc_url($current_url) . '" ' . $all_active . '>所有品牌</a></li>';
+
+        // Separator
+        $output .= '<li style="border-bottom:1px solid #ddd;"></li>';
+
+        // Hardcoded brand items
+        foreach ($hardcoded_names as $name) {
+            $brand_url    = add_query_arg('brand_filter', urlencode($name), $current_url);
+            $active_class = ($name == $selected_brand) ? 'class="active"' : '';
+
+            // Insert <br> after first space
+            $name_parts = preg_split('/\s+/', $name, 2);
+            if (count($name_parts) === 2) {
+                $display_name = esc_html($name_parts[0]) . '<br>' . esc_html($name_parts[1]);
+            } else {
+                $display_name = esc_html($name);
+            }
+
+            $output .= '<li><a href="' . esc_url($brand_url) . '" ' . $active_class . '>' . wp_kses_post($display_name) . '</a></li>';
+        }
+
+        // Separator
+        $output .= '<li style="border-bottom:1px solid #ddd;"></li>';
+
+        // Database brand items
+        foreach ($brands as $brand) {
+            $brand_url    = add_query_arg('brand_filter', urlencode($brand), $current_url);
+            $active_class = ($brand == $selected_brand) ? 'class="active"' : '';
+
+            $brand_parts = preg_split('/\s+/', $brand, 2);
+            if (count($brand_parts) === 2) {
+                $display_brand = esc_html($brand_parts[0]) . '<br>' . esc_html($brand_parts[1]);
+            } else {
+                $display_brand = esc_html($brand);
+            }
+
+            $output .= '<li><a href="' . esc_url($brand_url) . '" ' . $active_class . '>' . wp_kses_post($display_brand) . '</a></li>';
+        }
+
+        $output .= '</ul></div>';
+
+        // Add JavaScript for filtering
+        $output .= '
+        <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const searchInput = document.getElementById("brand-search");
+            const brandList = document.getElementById("brands-list");
+            const brands = brandList.getElementsByTagName("li");
+
+            searchInput.addEventListener("keyup", function() {
+                const filter = searchInput.value.toLowerCase();
+                for (let i = 0; i < brands.length; i++) {
+                    const a = brands[i].getElementsByTagName("a")[0];
+                    if (a) {
+                        const txtValue = a.textContent || a.innerText;
+                        if (txtValue.toLowerCase().includes(filter)) {
+                            brands[i].style.display = "";
+                        } else {
+                            brands[i].style.display = "none";
+                        }
+                    }
+                }
+            });
+        });
+        </script>
+        ';
+
+        return $output;
+    }
+}
+
+*/
+//Test 400
+//test 401
+/**
+ * Fixed brands menu with unique SKU counting to match product display
+ */
+/**
+ * Simplified brand menu counting unique SKUs with price and quantity > 0
+ */
+if (!function_exists('get_brands_menu')) {
+    function get_brands_menu($selected_brand) {
+        global $wpdb;
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+        $master_products_table = $wpdb->prefix . 'master_products';
+        
+        // Get supplier filter if applicable
+        $supplier_filter = '';
+        $supplier_ids = xwz_get_allowed_supplier_ids();
+        if (!empty($supplier_ids)) {
+            $supplier_filter = " AND s.seller_id IN ($supplier_ids)";
+        }
+        
+        // Simple count query - count unique SKUs with price and quantity > 0
+        $count_query = "
+            SELECT m.brand, COUNT(DISTINCT m.sku) as product_count
+            FROM $master_products_table m
+            INNER JOIN $supplier_stock_table s ON m.sku = s.sku
+            WHERE s.is_visible = 1 
+            AND s.quantity > 0 
+            AND s.partner_price > 0
+            AND m.brand != ''
+            $supplier_filter
+            GROUP BY m.brand
+            ORDER BY product_count DESC, m.brand ASC
+        ";
+        
+        // Get counts directly ordered by count
+        $brands_with_counts = $wpdb->get_results($count_query);
+        
+        // Remove brand_filter from current URL
+      $current_url = remove_query_arg(['brand_filter', 'search_query']);
+        
+        // Start building output
+        $output = '<div id="brand-menu">';
+        $output .= '<h3>品牌列表 (按产品数量排序)</h3>';
+        
+        // Add Search Input
+        $output .= '<input type="text" id="brand-search" placeholder="搜索品牌" style="width: 90%; padding: 5px; margin: 10px auto; display: block; border: 1px solid #ccc; border-radius: 4px;">';
+
+        $output .= '<ul id="brands-list">';
+        
+        // "All Brands" link
+        $all_active = (empty($selected_brand)) ? 'class="active"' : '';
+        $output .= '<li><a href="' . esc_url($current_url) . '" ' . $all_active . '>所有品牌</a></li>';
+
+        // Separator
+        $output .= '<li style="border-bottom:1px solid #ddd;"></li>';
+
+        // Display brands with counts
+        foreach ($brands_with_counts as $brand_data) {
+            $name = $brand_data->brand;
+            $count = $brand_data->product_count;
+            
+            // Skip brands with no products
+            if ($count == 0) continue;
+            
+            $brand_url = add_query_arg('brand_filter', urlencode($name), $current_url);
+            $active_class = ($name == $selected_brand) ? 'class="active"' : '';
+
+            // Insert <br> after first space for better formatting
+            $name_parts = preg_split('/\s+/', $name, 2);
+            if (count($name_parts) === 2) {
+                $display_name = esc_html($name_parts[0]) . '<br>' . esc_html($name_parts[1]);
+            } else {
+                $display_name = esc_html($name);
+            }
+
+            $output .= '<li><a href="' . esc_url($brand_url) . '" ' . $active_class . '>' . 
+                       wp_kses_post($display_name) . ' <span class="count">(' . $count . ')</span></a></li>';
+        }
+
+        $output .= '</ul></div>';
+
+        // Add CSS for count display
+        $output .= '<style>
+        #brand-menu .count {
+            font-size: 0.8em;
+            color: #666;
+            font-weight: normal;
+        }
+        #brand-menu a {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-right: 8px;
+        }
+        #brand-menu a span.count {
+            margin-left: 4px;
+            white-space: nowrap;
+        }
+        </style>';
+
+        // Add JavaScript for filtering
+        $output .= '
+        <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const searchInput = document.getElementById("brand-search");
+            const brandList = document.getElementById("brands-list");
+            const brands = brandList.getElementsByTagName("li");
+
+            searchInput.addEventListener("keyup", function() {
+                const filter = searchInput.value.toLowerCase();
+                for (let i = 0; i < brands.length; i++) {
+                    const a = brands[i].getElementsByTagName("a")[0];
+                    if (a) {
+                        const txtValue = a.textContent || a.innerText;
+                        if (txtValue.toLowerCase().includes(filter)) {
+                            brands[i].style.display = "";
+                        } else {
+                            brands[i].style.display = "none";
+                        }
+                    }
+                }
+            });
+        });
+        </script>
+        ';
+
+        return $output;
+    }
+}
+//Test 401
+/**
+ * Shortcode to display all products list
+ */
+if (!function_exists('display_all_products_list_shortcode')) {
+    add_shortcode('display_all_products_list', 'display_all_products_list_shortcode');
+    function display_all_products_list_shortcode($atts) {
+        $atts = shortcode_atts(
+            array(
+                'title'       => '',
+                'seller_id'   => '',
+                'room_id'     => '',
+                'is_featured' => '',
+                'sales'       => '',
+            ),
+            $atts,
+            'display_all_products_list'
+        );
+
+        $selected_brand  = isset($_GET['brand_filter']) ? sanitize_text_field($_GET['brand_filter']) : '';
+        $search_query    = isset($_GET['search_query']) ? sanitize_text_field($_GET['search_query']) : '';
+        $room_id         = isset($_GET['room_id']) ? sanitize_text_field($_GET['room_id']) : $atts['room_id'];
+        $is_featured     = isset($_GET['is_featured']) ? sanitize_text_field($_GET['is_featured']) : $atts['is_featured'];
+        $sales           = isset($_GET['sales']) ? sanitize_text_field($_GET['sales']) : $atts['sales'];
+
+        $display_filter  = isset($_GET['display_filter']) ? sanitize_text_field($_GET['display_filter']) : 'price_stock';
+        $category_filter = isset($_GET['category_filter']) ? sanitize_text_field($_GET['category_filter']) : '';
+
+        $affiliate_id = '';
+        $current_user_id = get_current_user_id();
+        if ($current_user_id > 0) {
+            $affiliate_id = get_user_meta($current_user_id, 'affiliate_id', true);
+            $affiliate_id = trim($affiliate_id);
+        }
+
+        // This function must exist in your project; not included here.
+        // It should return the HTML for the products listing grid or "没有可用的产品。"
+        $products_html = get_all_products_list_for_display(
+            $atts['seller_id'], 
+            $selected_brand, 
+            $search_query, 
+            $room_id, 
+            $is_featured, 
+            $sales,
+            $affiliate_id,
+            $display_filter,
+            $category_filter
+        );
+
+        // HEADER - just full width search bar
+  // HEADER - just full width search bar
+$output = '<div id="header">';
+$output .= '<div class="header-inner">';
+$output .= '<div class="search-wrapper">';
+$output .= get_products_search_form($search_query, $selected_brand, $room_id, $is_featured, $sales);
+$output .= '</div>';
+
+// Add spreadsheet view toggle button
+$output .= '<div class="view-toggle-container" style="margin-left: 15px; display: flex; align-items: center;">';
+
+// Get current full URL from browser
+$current_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://$_SERVER[HTTP_HOST]$_SERVER[REQUEST_URI]";
+
+// Replace or add the path to the spreadsheet view
+$spreadsheet_url = preg_replace('/\/[^\/]*$/', '/spv/', $current_url);
+
+// Remove any query parameters from the URL
+$spreadsheet_url = strtok($spreadsheet_url, '?');
+
+$output .= '<a href="' . esc_url($spreadsheet_url) . '" class="view-toggle-btn" style="display: inline-block; background: #4285f4; color: white; text-decoration: none; padding: 4px 10px; border-radius: 4px; font-size: 14px; white-space: nowrap;">切换到表格视图</a>';
+$output .= '</div>';
+// ====== Added: Hide Prices Toggle Switch ======
+$output .= '<div class="hide-prices-container">';
+$output .= '    <label class="switch" title="隐藏价格">';
+$output .= '        <input type="checkbox" id="hide-prices-toggle">';
+$output .= '        <span class="slider round"></span>';
+$output .= '    </label>';
+$output .= '    <span class="switch-label"></span>';
+$output .= '</div>';
+// =============================================
+
+        $output .= '</div>'; // End of header-inner
+        $output .= '</div>'; // End of header
+
+        $output .= '<div id="product-page-container">';
+
+        // LEFT COLUMN
+        $output .= '<div id="left-column">';
+        $output .= '<form method="get" class="filters-form">';
+
+        foreach ($_GET as $key => $value) {
+            // Preserve all query vars except certain ones
+            if (!in_array($key, array('display_filter', 'category_filter', 'search_query','paged','sku', 'id'))) {
+                $output .= '<input type="hidden" name="' . esc_attr($key) . '" value="' . esc_attr($value) . '">';
+            }
+        }
+        $output .= '<div class="filters-row">';
+        $output .= get_products_display_filter($display_filter);
+        $output .= get_products_category_filter($category_filter);
+        $output .= '</div>';
+        $output .= '</form>';
+        $output .= get_brands_menu($selected_brand);
+        $output .= '</div>'; // End of left-column
+
+        // RIGHT CONTENT
+        $output .= '<div id="right-content">';
+        $output .= '<div class="products-container">';
+        if (strip_tags($products_html) === '没有可用的产品。') {
+            $output .= '<p class="no-products">没有可用的产品。</p>';
+        } else {
+            $output .= $products_html;
+        }
+        $output .= '</div>';
+        $output .= '</div>'; // End of right-content
+        $output .= '</div>'; // End of product-page-container
+
+        // ====== Added: CSS Styles for Hide Prices Toggle and Layout ======
+        $output .= '<style>
+        
+        .products-list a h2 {
+            font-weight: 700!important;
+        }
+        
+        .filters-form {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: #f9f9f9;
+        }
+        
+        html, body {
+            margin:0; padding:0;
+            box-sizing:border-box;
+            font-family: Arial, sans-serif;
+            width:100%; height:100%;
+            overflow:hidden; /* Keep overflow hidden to maintain left-right layout */
+        }
+        *, *:before, *:after {
+            box-sizing:border-box;
+            margin:0; padding:0;
+        }
+        
+        #header {
+            width:100%;
+            border-bottom:1px solid #ddd;
+        }
+        .header-inner {
+            display:flex;
+            align-items:center;
+            width:100%;
+            padding:5px;
+        }
+        .search-wrapper {
+            width:100%;
+        }
+        .products-search-form {
+            width:100%;
+            margin:0;
+        }
+        
+        #product-page-container {
+            display:flex;
+            width:100%;
+            height:calc(100vh - 36px - 1px); /* Adjust based on header height */
+            overflow:hidden; /* Prevent overall page scroll */
+        }
+        
+        #left-column {
+            width:25%;
+            max-width: 300px;
+            border-right:1px solid #ddd;
+            overflow-y:auto; /* Allow vertical scroll within left column if content overflows */
+            overflow-x:hidden;
+            flex-shrink:0;
+            margin:5px;
+            padding:5px;
+        }
+        
+        .filters-form {
+            width:100%;
+            margin:0;
+            padding:5px;
+            box-sizing:border-box;
+        }
+        
+        .filters-row {
+            display:flex;
+            flex-direction:column;
+            gap:5px;
+            width:100%;
+        }
+        
+        .filter-item {
+            font-size:0.8em;
+            width:100%;
+        }
+        
+        .filter-label {
+            font-size:0.8em;
+            color:#333;
+            margin-bottom:3px;
+            white-space:nowrap;
+            font-weight:normal;
+        }
+        
+        .filter-icon {
+            margin-right:3px;
+            font-size:1em;
+        }
+        
+        .filter-select {
+            border:1px solid #ccc;
+            border-radius:3px;
+            font-size:0.8em;
+            padding:2px 5px;
+            width:100%;
+            box-sizing:border-box;
+        }
+        
+        #brand-menu {
+            margin-top:5px;
+            padding:5px;
+            box-sizing:border-box;
+            width:100%;
+        }
+        #brand-menu h3 {
+            font-size:0.8em;
+            text-align:center;
+            color:#E91E63;
+            margin-bottom:5px;
+            font-weight:normal;
+            width:100%;
+        }
+        
+        #brand-menu ul {
+            list-style:none;
+            width:100%;
+        }
+        
+        #brand-menu li {
+            margin-bottom:3px;
+            width:100%;
+        }
+        
+        #brand-menu a {
+            text-decoration:none;
+            color:#333;
+            font-size:0.75em;
+            display:block;
+            border-radius:3px;
+            transition: background 0.3s, color 0.3s;
+            padding:3px;
+            line-height:1.1;
+            width:100%;
+            box-sizing:border-box;
+        }
+        
+        #brand-menu a:hover {
+            background:#eaeaea;
+        }
+        
+        #brand-menu a.active {
+            background:#E91E63;
+            color:#fff;
+        }
+        
+        #right-content {
+            flex:1;
+            overflow-y:auto; /* Allow vertical scroll within right content */
+            position:relative;
+            padding:5px;
+            box-sizing:border-box;
+        }
+        
+        .no-products {
+            display: block;
+            width: 100%;
+            box-sizing: border-box;
+            text-align:left;
+            margin: 10px 0;
+        }
+        
+        .products-container {
+            width: 100%;
+            box-sizing:border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        #right-content,
+        .products-container,
+        .no-products,
+        .products-list {
+            width: 100%;
+            box-sizing:border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .products-list {
+            display:grid;
+            gap:5px;
+            margin-top:5px;
+            width:100%;
+            box-sizing:border-box;
+        }
+        
+        @media (max-width:480px) {
+            .products-list {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media (min-width:481px) and (max-width:769px) {
+            .products-list {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+        @media (min-width:770px) {
+            .products-list {
+                grid-template-columns: repeat(6, 1fr);
+            }
+        }
+        
+        .product-item {
+            background:#fff;
+            border:1px solid #ddd;
+            border-radius:3px;
+            text-align:center;
+            overflow:hidden;
+            position:relative;
+            transition: box-shadow 0.3s;
+            padding:5px;
+            display:flex;
+            flex-direction:column;
+            align-items:center;
+            justify-content:flex-start;
+            width:100%;
+            box-sizing:border-box;
+        }
+        .product-item:hover {
+            box-shadow:0 4px 8px rgba(0,0,0,0.15);
+        }
+        .product-item img {
+            width:100%;
+            height:100px;
+            object-fit:cover;
+            object-position:50% 50%;
+            margin-bottom:5px;
+            border-radius:2px;
+        }
+        .product-item h2 {
+            font-size:0.7em;
+            color:#333;
+            line-height:1;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            width:100%;
+            text-align:center;
+            font-weight:normal;
+            margin-bottom:5px;
+            direction:ltr;
+        }
+        
+        .product-item p {
+            font-size:0.7em;
+            color:#666;
+            line-height:1.2;
+            margin-bottom:3px;
+            text-align:center;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            width:100%;
+            box-sizing:border-box;
+        }
+        
+        .product-sku {
+            font-size:0.65em;
+            color:#999;
+        }
+        
+        .product-price-range {
+            font-size:0.7em;
+            color:#4CAF50!important;
+            font-weight:normal;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            width:100%;
+            box-sizing:border-box;
+        }
+        
+        .featured-label {
+            position:absolute;
+            top:0;
+            left:0;
+            background:#E91E63;
+            color:#fff;
+            font-size:0.7em;
+            padding:2px 4px;
+            border-radius:0 0 3px 0;
+            font-weight:normal;
+        }
+        
+        .ast-single-post .entry-content a, .ast-comment-content a:not(.ast-comment-edit-reply-wrap a), .woocommerce-js .woocommerce-product-details__short-description a {
+            text-decoration: none!important; 
+        }
+        
+        /* ====== Added: Hide Prices Toggle Styles ====== */
+        .hide-prices-container {
+            margin-left: 20px; /* Adjust spacing as needed */
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        /* Switch Styles */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #4285f4;
+        }
+        
+        input:focus + .slider {
+            box-shadow: 0 0 1px #4285f4;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .switch-label {
+            font-size: 0.8em;
+            color: #333;
+            user-select: none;
+        }
+        /* ====== End: Hide Prices Toggle Styles ====== */
+        /* ====== Added: Hide Prices Functionality ====== */
+.hide-prices .product-price-range,
+.hide-prices .list-price,
+.hide-prices .partner-price {
+    display: none;
+}
+
+/* Hide prices and quantity for non-logged-in users */
+body:not(.logged-in) .product-price-range,
+body:not(.logged-in) .list-price,
+body:not(.logged-in) .partner-price,
+body:not(.logged-in) .product-quantity {
+    display: none !important;
+}
+/* ====== End: Hide Prices Functionality ====== */
+		
+			/* Link */
+	#brand-menu li:nth-child(1) a{
+		padding-left:8px;
+		
+	}
+        
+        </style>';
+
+        // ====== Added: JavaScript for Hide Prices Toggle ======
+        $output .= '<script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const hidePricesToggle = document.getElementById("hide-prices-toggle");
+            const productsContainer = document.querySelector(".products-container");
+
+            // Initialize toggle based on localStorage
+            if (localStorage.getItem("hidePrices") === "true") {
+                hidePricesToggle.checked = true;
+                productsContainer.classList.add("hide-prices");
+            }
+
+            hidePricesToggle.addEventListener("change", function() {
+                if (this.checked) {
+                    productsContainer.classList.add("hide-prices");
+                    localStorage.setItem("hidePrices", "true");
+                } else {
+                    productsContainer.classList.remove("hide-prices");
+                    localStorage.setItem("hidePrices", "false");
+                }
+            });
+        });
+        </script>';
+        // ================================================
+
+        return $output;
+    }
+}
+
+
+/**
+ * Display custom fields in cart and orders
+ */
+if (!function_exists('my_custom_display_cart_item_data')) {
+    add_filter('woocommerce_get_item_data', 'my_custom_display_cart_item_data', 10, 2);
+    function my_custom_display_cart_item_data($item_data, $cart_item) {
+        $current_user_id = get_current_user_id();
+        $affiliate_id = '';
+        if ($current_user_id > 0) {
+            $affiliate_id = get_user_meta($current_user_id, 'affiliate_id', true);
+            $affiliate_id = trim($affiliate_id);
+        }
+
+        $custom_fields = [
+            'custom_sku'       => 'SKU',
+            'product_title'    => '名称',
+            'brand'            => '品牌',
+            'category'         => '分类',
+            'supplier_row_id'  => '自定义表RowID'
+        ];
+
+        foreach ($custom_fields as $key => $label) {
+            if (isset($cart_item[$key])) {
+                $item_data[] = [
+                    'name'  => $label,
+                    'value' => $cart_item[$key]
+                ];
+            }
+        }
+
+        // Add price information
+        if (!empty($affiliate_id)) {
+            // For affiliates, show both list price and partner price
+            $item_data[] = [
+                'name'  => '列表价',
+                'value' => wc_price($cart_item['list_price']) . ' (H ' . get_hkd_price($cart_item['list_price']) . ')'
+            ];
+            $item_data[] = [
+                'name'  => '伙伴价',
+                'value' => wc_price($cart_item['partner_price']) . ' (H ' . get_hkd_price($cart_item['partner_price']) . ')'
+            ];
+        } else {
+            // For non-affiliates, show only list price
+            $item_data[] = [
+                'name'  => '列表价',
+                'value' => wc_price($cart_item['list_price']) . ' (H ' . get_hkd_price($cart_item['list_price']) . ')'
+            ];
+        }
+
+        return $item_data;
+    }
+}
+/**
+ * Override cart price with custom price
+ */
+if (!function_exists('my_custom_override_cart_price')) {
+   add_action('woocommerce_before_calculate_totals', 'my_custom_override_cart_price', 10, 1);
+   function my_custom_override_cart_price($cart) {
+       if (did_action('woocommerce_before_calculate_totals') >= 2) {
+           return;
+       }
+       
+       $current_user_id = get_current_user_id();
+       $affiliate_id = '';
+       if ($current_user_id > 0) {
+           $affiliate_id = get_user_meta($current_user_id, 'affiliate_id', true);
+           $affiliate_id = trim($affiliate_id);
+       }
+
+       foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
+           if (isset($cart_item['list_price'])) {
+               if (!empty($affiliate_id)) {
+                   // For affiliates, use the partner price directly from cart item data
+                   $cart_item['data']->set_price($cart_item['partner_price']);
+               } else {
+                   // For non-affiliates, use the list price directly from cart item data
+                   $cart_item['data']->set_price($cart_item['list_price']);
+               }
+           }
+       }
+   }
+}
+
+/**
+ * Save custom fields to order items
+ */
+if (!function_exists('my_custom_save_order_item_meta')) {
+    add_action('woocommerce_checkout_create_order_line_item', 'my_custom_save_order_item_meta', 10, 4);
+    function my_custom_save_order_item_meta($item, $cart_item_key, $values, $order) {
+        // Ensure we store all relevant data in the order
+        $custom_fields = [
+            'custom_sku'       => 'SKU',
+            'product_title'    => '名称',
+            'brand'            => '品牌',
+            'category'         => '分类',
+            'supplier_row_id'  => '自定义表RowID',
+            'concert_date'     => '演唱会日期',
+            'concert_location' => '地点',
+            'seat_section'     => '区块',
+            'seat_row'         => '行',
+            'seat_number'      => '座号',
+            'supplier_name'    => '供应商',
+            'custom_price'     => '价格',
+            'list_price'       => '列表价(记录)',
+            'partner_price'    => '合作伙伴价(记录)',
+        ];
+
+        foreach ($custom_fields as $key => $label) {
+            if (isset($values[$key])) {
+                if ($key === 'custom_price' || $key === 'list_price' || $key === 'partner_price') {
+                    $item->add_meta_data($label, wc_price($values[$key]), true);
+                } else {
+                    $item->add_meta_data($label, $values[$key], true);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Additional action for adding concert tickets (if needed)
+ */
+if (!function_exists('my_custom_add_concert_ticket')) {
+    add_action('template_redirect', 'my_custom_add_concert_ticket');
+    function my_custom_add_concert_ticket() {
+        if (isset($_POST['add_concert_ticket'])) {
+            $ticket_id        = intval($_POST['concert_ticket_id']);
+            $quantity         = intval($_POST['quantity']);
+            $list_price      = floatval($_POST['price']);
+            $partner_price   = isset($_POST['partner_price']) ? floatval($_POST['partner_price']) : $list_price;
+            $concert_name     = sanitize_text_field($_POST['concert_name']);
+            $concert_date     = sanitize_text_field($_POST['concert_date']);
+            $concert_location = sanitize_text_field($_POST['concert_location']);
+            $supplier_name    = isset($_POST['supplier_name']) ? sanitize_text_field($_POST['supplier_name']) : 'N/A';
+
+            // Check if user is affiliate
+            $current_user_id = get_current_user_id();
+            $affiliate_id = '';
+            if ($current_user_id > 0) {
+                $affiliate_id = get_user_meta($current_user_id, 'affiliate_id', true);
+                $affiliate_id = trim($affiliate_id);
+            }
+
+            // Add to cart with appropriate price
+            $cart_item_key = WC()->cart->add_to_cart(
+                1371, 
+                $quantity, 
+                0, 
+                [], 
+                [
+                    'list_price'        => $list_price,           // Store original list price
+                    'partner_price'     => $partner_price,        // Store partner price
+                    'custom_sku'        => $ticket_id,
+                    'product_title'     => $concert_name,
+                    'brand'             => '',
+                    'category'          => '',
+                    'concert_date'      => $concert_date,
+                    'concert_location'  => $concert_location,
+                    'seat_section'      => $ticket->seat_section ? $ticket->seat_section : '',
+                    'seat_row'          => $ticket->seat_row ? $ticket->seat_row : '',
+                    'seat_number'       => $ticket->seat_number ? $ticket->seat_number : '',
+                    'supplier_name'     => $supplier_name,
+                    'is_affiliate'      => !empty($affiliate_id)  // Store affiliate status
+                ]
+            );
+
+            if ($cart_item_key) {
+                wc_add_notice('产品已加入购物车。', 'success');
+            } else {
+                wc_add_notice('无法添加到购物车，请重试。', 'error');
+            }
+        }
+    }
+}
+/**
+ * Check custom stock BEFORE payment in checkout.
+ */
+if (!function_exists('my_custom_check_stock_in_custom_table')) {
+    add_action('woocommerce_check_cart_items', 'my_custom_check_stock_in_custom_table');
+    function my_custom_check_stock_in_custom_table() {
+		    if (get_option('disable_stock_check', 0)) return;
+        global $wpdb;
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+
+        foreach (WC()->cart->get_cart() as $cart_item_key => $cart_item) {
+            // We get the real row_id from 'supplier_row_id'
+            if (!empty($cart_item['supplier_row_id'])) {
+                $row_id   = intval($cart_item['supplier_row_id']);
+                $quantity = $cart_item['quantity'];
+
+                $available_qty = (int) $wpdb->get_var($wpdb->prepare("
+                    SELECT quantity FROM $supplier_stock_table
+                    WHERE id = %d
+                ", $row_id));
+
+                // Debug line (optional)
+                error_log("Checking row #{$row_id} in custom table. Cart qty={$quantity}, DB qty={$available_qty}");
+
+                if ($available_qty < $quantity) {
+                    $title_safe = isset($cart_item['product_title']) ? $cart_item['product_title'] : '';
+                    wc_add_notice('抱歉，库存不足 (' . $title_safe . ')，无法继续结账。', 'error');
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Deduct from custom table when order status changes to "processing"
+ */
+if (!function_exists('my_custom_deduct_stock_in_custom_table')) {
+    add_action('woocommerce_order_status_processing', 'my_custom_deduct_stock_in_custom_table', 20, 1);
+    function my_custom_deduct_stock_in_custom_table($order_id) {
+		    if (get_option('disable_stock_check', 0)) return;
+        global $wpdb;
+        $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+
+        $order = wc_get_order($order_id);
+        if (!$order) return;
+
+        // We look for our "supplier_row_id" that was saved to the order item meta
+        foreach ($order->get_items() as $item_id => $item) {
+            $unique_id = $item->get_meta('自定义表RowID'); // This matches the label we used above
+            if (!empty($unique_id)) {
+                $row_id = intval($unique_id);
+                $qty    = $item->get_quantity();
+
+                $wpdb->query($wpdb->prepare("
+                    UPDATE $supplier_stock_table
+                    SET quantity = GREATEST(quantity - %d, 0)
+                    WHERE id = %d
+                ", $qty, $row_id));
+            }
+        }
+    }
+}
+
+/**
+ * Display a counter showing the total number of products listed on the page
+ */
+if (!function_exists('display_product_count')) {
+    function display_product_count() {
+        // Inline styles for positioning the counter
+        $styles = "
+            position: fixed;
+            top: 5px;
+            right: 10px;
+            background: #4285f4;
+            color: #fff;
+            padding: 2px 3px;
+            border-radius: 5px;
+            font-size: 14px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+            z-index: 9999;
+        ";
+
+        // Output the counter div with initial text
+        echo '<div id="product-count" style="' . esc_attr($styles) . '"> 0</div>';
+
+        // JavaScript to count the number of .product-item elements and update the counter
+        echo '<script>
+        document.addEventListener("DOMContentLoaded", function() {
+            function updateProductCount() {
+                var count = document.querySelectorAll(".product-item").length;
+                document.getElementById("product-count").textContent = " " + count +" 种 库存 ";
+            }
+
+            // Initial count
+            updateProductCount();
+
+            // Optional: Observe DOM changes if products can be loaded dynamically
+            var productsContainer = document.querySelector(".products-container");
+            if (productsContainer) {
+                var observer = new MutationObserver(function(mutations) {
+                    updateProductCount();
+                });
+
+                observer.observe(productsContainer, { childList: true, subtree: true });
+            }
+        });
+        </script>';
+    }
+}
+// Hook the function to display the counter in the footer
+add_action('wp_footer', 'display_product_count'); // Add to the footer for visibility on the page
+
+function make_first_brand_li_sticky() {
+    echo '
+    <script>
+    document.addEventListener("DOMContentLoaded", function() {
+        // 1) Get the first <li> in #brand-menu
+        const firstLi = document.querySelector("#brand-menu ul li");
+        if (firstLi) {
+            // 2) Make that <li> sticky
+            firstLi.style.position = "sticky";
+            firstLi.style.top = "50px";
+			
+           firstLi.style.zIndex = "10";
+            firstLi.style.background = "#FFFFFF";
+            firstLi.style.padding = "5px";
+            firstLi.style.borderBottom = "1px solid #ddd";
+        }
+    });
+    </script>
+    ';
+}
+
+/* THIS IS THE ID AND NAME (370) xx Part 7(3)** of X: Frontend Shortcodes (Product Listing, Single Product), Add to Cart Logic, and Related CSS/HTML */
+function get_hkd_price($rmb_price) {
+    $exchange_rate = get_latest_exchange_rate();
+    $factor = 0.98;
+    
+    // Calculate the HKD price
+    $hkd_price = ($rmb_price / $exchange_rate) * $factor;
+   
+    // Round to nearest 10
+    $rounded_hkd = round($hkd_price / 10) * 10;
+    
+    return number_format($rounded_hkd, 0); // Remove decimal places since we're rounding to 10s
+}
+function get_all_products_list_for_display(
+    $seller_id = '',
+    $brand_filter = '',
+    $search_query = '',
+    $room_id = '',
+    $is_featured = '',
+    $sales = '',
+    $affiliate_id = '',
+    $display_filter = 'price_stock',
+    $category_filter = ''
+) {
+    global $wpdb;
+    $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+    $master_products_table = $wpdb->prefix . 'master_products';
+
+    // Base WHERE clause components
+    $base_where = "s.is_visible = 1 AND s.partner_price > 0";
+
+    // Initialize parameters array for prepared statements
+    $params = array();
+
+    // If no specific category is chosen (meaning the user wants to see "all"),
+    // then exclude the category called "OTHERS".
+    if (empty($category_filter)) {
+    $base_where .= " AND m.product_category NOT IN (%s, %s)";
+    $params[] = 'Others 其它';
+    $params[] = 'Cuban 古巴 | PCC';
+}
+
+    // Apply common filters
+    if (!empty($seller_id)) {
+        $base_where .= " AND s.seller_id = %d";
+        $params[] = intval($seller_id);
+    }
+    if (!empty($brand_filter)) {
+        $base_where .= " AND m.brand = %s";
+        $params[] = $brand_filter;
+    }
+    if (!empty($category_filter)) {
+        $base_where .= " AND m.product_category = %s";
+        $params[] = $category_filter;
+    }
+    if (!empty($search_query)) {
+        $like = '%' . $wpdb->esc_like($search_query) . '%';
+        $base_where .= " AND (m.sku LIKE %s OR m.product_title LIKE %s OR m.product_category LIKE %s OR m.brand LIKE %s)";
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $like;
+        $params[] = $like;
+    }
+    if (!empty($room_id)) {
+        $base_where .= " AND m.room_id = %s";
+        $params[] = $room_id;
+    }
+    if (!empty($is_featured)) {
+        $base_where .= " AND s.is_featured = %d";
+        $params[] = intval($is_featured);
+    }
+    if (!empty($sales)) {
+        $base_where .= " AND s.sales >= %d";
+        $params[] = intval($sales);
+    }
+
+    // For 'price_stock', ensure quantity > 0
+    if ($display_filter === 'price_stock') {
+        $base_where .= " AND s.quantity > 0";
+    }
+
+function fetch_products($wpdb, $supplier_stock_table, $master_products_table, $base_where, $params, $additional_condition, $additional_params) {
+    // Add supplier filtering based on family-supplier mapping
+    $supplier_filter = '';
+    $main_supplier_filter = '';
+    $supplier_ids = xwz_get_allowed_supplier_ids();
+    
+    if (!empty($supplier_ids)) {
+        $supplier_filter = " AND ss.seller_id IN ($supplier_ids)";
+        $main_supplier_filter = " AND s.seller_id IN ($supplier_ids)";
+    }
+		
+		
+		// Generate a dynamic placeholder for $additional_condition
+    $all_params = $params;  // Start with base params
+    
+    // If we have additional parameters, add them
+    if (!empty($additional_params)) {
+        $all_params = array_merge($all_params, $additional_params);
+    }
+    
+    if (!empty($all_params)) {
+        $query = $wpdb->prepare("
+            SELECT s.*, 
+                   m.product_title, 
+                   m.product_category, 
+                   m.brand, 
+                   m.main_photo, 
+                   s.sku AS master_sku, 
+                   m.room_id,
+                   m.seats_reference
+            FROM $supplier_stock_table s
+            INNER JOIN $master_products_table m ON s.sku = m.sku
+            INNER JOIN (
+                SELECT sku, MIN(partner_price) as min_partner_price
+                FROM $supplier_stock_table ss
+                WHERE ss.is_visible = 1 
+                AND ss.partner_price > 0
+                $supplier_filter
+                GROUP BY sku
+            ) min_prices ON s.sku = min_prices.sku 
+            AND s.partner_price = min_prices.min_partner_price
+            WHERE $base_where
+            AND $additional_condition
+           $main_supplier_filter
+		   ORDER BY s.partner_price ASC, m.sku ASC
+        ", $all_params);
+        
+        return $wpdb->get_results($query);
+    } else {
+        // If no parameters, run the query without prepare
+        $query = "
+            SELECT s.*, 
+                   m.product_title, 
+                   m.product_category, 
+                   m.brand, 
+                   m.main_photo, 
+                   s.sku AS master_sku, 
+                   m.room_id,
+                   m.seats_reference
+            FROM $supplier_stock_table s
+            INNER JOIN $master_products_table m ON s.sku = m.sku
+            INNER JOIN (
+                SELECT sku, MIN(partner_price) as min_partner_price
+                FROM $supplier_stock_table ss
+                WHERE ss.is_visible = 1 
+                AND ss.partner_price > 0
+                $supplier_filter
+                GROUP BY sku
+            ) min_prices ON s.sku = min_prices.sku 
+            AND s.partner_price = min_prices.min_partner_price
+            WHERE $base_where
+            AND $additional_condition
+           $main_supplier_filter
+		   ORDER BY s.partner_price ASC, m.sku ASC
+        ";
+		
+        return $wpdb->get_results($query);
+    }
+}
+
+    // Define the different product groups with their specific conditions
+    $product_groups = array(
+        'both_on_sale_and_featured' => array(
+            'condition' => "s.on_sale = 1 AND s.is_featured = 1",
+            'label' => '特 + 速', // Adjust labels as needed
+            'label_style' => ''
+        ),
+        'on_sale_only' => array(
+            'condition' => "s.on_sale = 1 AND s.is_featured != 1",
+            'label' => '特',
+            'label_style' => 'background:#FF5722;' // Example style
+        ),
+        'featured_only' => array(
+            'condition' => "s.is_featured = 1 AND s.on_sale != 1",
+            'label' => '速',
+            'label_style' => ''
+        ),
+        'others' => array(
+            'condition' => "s.on_sale != 1 AND s.is_featured != 1",
+            'label' => '',
+            'label_style' => ''
+        )
+    );
+
+    // Initialize an array to hold all SKUs to avoid duplication
+    $all_displayed_skus = array();
+
+    // Initialize the HTML output
+    $output = '<div class="products-list">';
+
+    // Iterate through each product group and display accordingly
+    foreach ($product_groups as $group_key => $group_info) {
+        // Fetch products for the current group
+        $group_products = fetch_products(
+            $wpdb,
+            $supplier_stock_table,
+            $master_products_table,
+            $base_where,
+            $params,
+            $group_info['condition'],
+            array()
+        );
+
+        // If no products in this group, skip to the next
+        if (empty($group_products)) {
+            continue;
+        }
+
+        // Loop through each product in the current group
+        foreach ($group_products as $product) {
+            // Avoid displaying duplicate products by SKU
+            if (in_array($product->master_sku, $all_displayed_skus)) {
+                continue;
+            }
+            $all_displayed_skus[] = $product->master_sku;
+
+            $product_title      = isset($product->product_title) ? $product->product_title : '';
+            $sku               = wp_kses_post($product->sku);
+            $quantity          = intval($product->quantity);
+            $rrp               = floatval($product->recommended_retail_price);
+            $list_price        = floatval($product->list_price);
+            $partner_price     = floatval($product->partner_price); // Use lowest partner price
+            $seller_id_display = intval($product->seller_id);
+            $room_id_val       = intval($product->room_id);
+            $product_id        = intval($product->id); // Unique identifier
+            $seats_reference   = isset($product->seats_reference) ? trim($product->seats_reference) : ''; // Get seats_reference
+
+            $main_photo = $product->main_photo;
+            if (!empty($main_photo)) {
+                $main_photo = M_xwz_clean_photo_url($main_photo);
+            } else {
+                $main_photo = '/wp-content/uploads/2025/02/coming-soon.png';
+            }
+
+      // TO THIS (new code):
+//test22
+// TO THIS (new code):
+//test22
+// TO THIS (new code):
+
+$user_id = get_current_user_id();
+
+// First check for fixed price override (highest priority)
+global $wpdb;
+$fixed_prices_table = $wpdb->prefix . 'xwz_user_fixed_prices';
+
+// Direct user fixed price check
+$user_fixed_price = $wpdb->get_var($wpdb->prepare(
+    "SELECT fixed_price FROM $fixed_prices_table 
+     WHERE sku = %s AND target_type = 'user' 
+     AND target_id = %d AND active = 1",
+    $sku,
+    $user_id
+));
+
+if ($user_fixed_price !== null) {
+    // If fixed price exists, use it directly
+    $adjusted_list_price = floatval($user_fixed_price);
+    $adjusted_partner_price = $partner_price; // Keep partner price as is
+} else {
+    // Check for family fixed price
+    $family_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT meta_value FROM {$wpdb->prefix}usermeta 
+         WHERE user_id = %d AND meta_key = 'family_id' 
+         LIMIT 1",
+        $user_id
+    ));
+    
+    if ($family_id) {
+        $family_fixed_price = $wpdb->get_var($wpdb->prepare(
+            "SELECT fixed_price FROM $fixed_prices_table 
+             WHERE sku = %s AND target_type = 'family' 
+             AND target_id = %s AND active = 1",
+            $sku,
+            $family_id
+        ));
+        
+        if ($family_fixed_price !== null) {
+            // If family fixed price exists, use it directly
+            $adjusted_list_price = floatval($family_fixed_price);
+            $adjusted_partner_price = $partner_price; // Keep partner price as is
+        } else {
+            // No fixed prices - apply standard price adjustments
+            $adjusted_list_price = $list_price;
+            $adjusted_partner_price = $partner_price;
+
+            if ($seller_id_display && $room_id_val) {
+                $adjusted_list_price = M_xwz_get_adjusted_price($list_price, 'list', $sku, $seller_id_display, $room_id_val);
+                $adjusted_partner_price = M_xwz_get_adjusted_price($partner_price, 'partner', $sku, $seller_id_display, $room_id_val);
+            }
+            
+            // Apply user-specific rules last
+            if ($user_id) {
+                $adjusted_list_price = M_xwz_apply_user_list_price_rules($adjusted_list_price, $user_id, $sku);
+            }
+        }
+    } else {
+        // No family ID - apply standard price adjustments
+        $adjusted_list_price = $list_price;
+        $adjusted_partner_price = $partner_price;
+
+        if ($seller_id_display && $room_id_val) {
+            $adjusted_list_price = M_xwz_get_adjusted_price($list_price, 'list', $sku, $seller_id_display, $room_id_val);
+            $adjusted_partner_price = M_xwz_get_adjusted_price($partner_price, 'partner', $sku, $seller_id_display, $room_id_val);
+        }
+        
+        // Apply user-specific rules last
+        if ($user_id) {
+            $adjusted_list_price = M_xwz_apply_user_list_price_rules($adjusted_list_price, $user_id, $sku);
+        }
+    }
+}
+			//test23
+			
+            // Include 'id' in the single product URL
+            $single_product_page_url = site_url('/single/');
+            $single_product_url = add_query_arg(array(
+                'sku' => $sku,
+                'id'  => $product_id
+            ), $single_product_page_url);
+
+            $output .= '<div class="product-item" style="position: relative;">';
+
+            // Display badge if seats_reference is not empty
+            if (!empty($seats_reference)) {
+                $output .= '<span class="seats-reference-badge" style="
+                    position: absolute;
+                    top: 0px;
+                    right: 0px;
+                    background-color: #808080; /* Grey background */
+                    color: #FFFFFF;            /* White text */
+                    padding: 1px 3px;
+                    border-radius: 3px;
+                    font-size: 10px;
+                    z-index: 10;
+                ">详</span>';
+            }
+
+            // Display labels based on the group
+            if ($group_key === 'both_on_sale_and_featured') {
+                // Both On Sale and Featured
+                $output .= '<span class="featured-label" style="' . esc_attr($group_info['label_style']) . '">' . esc_html($group_info['label']) . '</span>';
+            } elseif ($group_key === 'on_sale_only') {
+                // Only On Sale
+                $output .= '<span class="featured-label" style="' . esc_attr($group_info['label_style']) . '">' . esc_html($group_info['label']) . '</span>';
+            } elseif ($group_key === 'featured_only') {
+                // Only Featured
+                if (!empty($group_info['label'])) {
+                    $output .= '<span class="featured-label" style="' . esc_attr($group_info['label_style']) . '">' . esc_html($group_info['label']) . '</span>';
+                }
+            }
+            // No label for 'others' group
+
+       $output .= '<a href="' . esc_url($single_product_url) . '">
+    <img src="' . esc_url($main_photo) . '" alt="' . esc_attr($product_title) . '" loading="lazy">
+</a>';
+            $output .= '<p class="product-sku">SKU: ' . esc_html($sku) . '</p>';
+
+            // **Render Product Title with Full HTML**
+            // IMPORTANT: Ensure that $product_title is sanitized before rendering full HTML
+            $output .= '<a href="' . esc_url($single_product_url) . '"><h2>' . wp_kses_post($product_title) . '</h2></a>';
+
+            $output .= '<p class="product-quantity">库存: ' . esc_html($quantity) . '</p>';
+
+         // TO THIS (new code):
+if ($rrp > 0) {
+    $output .= '<p class="product-price-range">建议零售价: ' . number_format($rrp, 0) . ' (H  ' . get_hkd_price($rrp) . ')</p>';
+}
+
+// Display list price for everyone
+$output .= '<p class="product-price-range">列表价: ' . number_format($adjusted_list_price, 0) . ' (H  ' . get_hkd_price($adjusted_list_price) . ')</p>';
+
+// Display partner price only for affiliates
+if (!empty($affiliate_id)) {
+    $output .= '<p class="product-price-range">伙伴价: ' . number_format($adjusted_partner_price, 0) . ' (H  ' . get_hkd_price($adjusted_partner_price) . ')</p>';
+}
+
+            $output .= '</div>';
+        }
+    }
+
+    $output .= '</div>'; // Close the main products-list div
+
+    // If no products were found in any group, display a message
+    if (empty($all_displayed_skus)) {
+        return '<p class="no-products">没有可用的产品。</p>';
+    }
+
+    return $output;
+}
+
+
+function M_xwz_apply_user_list_price_rules($list_price, $user_id, $sku) {
+    global $wpdb;
+    
+    M_xwz_debug_log('Starting price calculation', [
+        'list_price' => $list_price,
+        'user_id' => $user_id,
+        'sku' => $sku
+    ]);
+    
+    $family_id = M_xwz_get_user_family_id($user_id);
+    M_xwz_debug_log('Retrieved family_id', $family_id);
+    
+    // Get applicable rules
+    $rules_table = $wpdb->prefix . 'user_list_price_rules';
+    $rules = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM $rules_table 
+        WHERE is_active = %d 
+        ORDER BY priority ASC, id ASC",
+        1
+    ));
+    
+    M_xwz_debug_log('Found active rules', count($rules));
+    
+    $adjusted_price = $list_price;
+    
+    foreach ($rules as $rule) {
+        // Check excluded SKUs first
+        if (!empty($rule->excluded_skus)) {
+            $excluded_skus = explode(',', $rule->excluded_skus);
+            $excluded_skus = array_map('trim', $excluded_skus);
+            if (in_array($sku, $excluded_skus)) {
+                M_xwz_debug_log('Rule skipped - SKU is excluded', [
+                    'sku' => $sku,
+                    'rule_id' => $rule->id
+                ]);
+                continue;
+            }
+        }
+
+        M_xwz_debug_log('Processing rule', [
+            'rule_id' => $rule->id,
+            'rule_name' => $rule->rule_name,
+            'current_price' => $adjusted_price
+        ]);
+        
+        // Check if rule applies to this user/family group
+        $target_ids = explode(',', $rule->target_ids);
+        $target_ids = array_map('trim', $target_ids);
+        
+        if ($rule->target_type === '用户') {
+            if (!in_array($user_id, $target_ids)) {
+                M_xwz_debug_log('Rule skipped - user not in target list', [
+                    'user_id' => $user_id,
+                    'target_ids' => $target_ids
+                ]);
+                continue;
+            }
+        } else if ($rule->target_type === '家庭组') {
+            if (!in_array($family_id, $target_ids)) {
+                M_xwz_debug_log('Rule skipped - family not in target list', [
+                    'family_id' => $family_id,
+                    'target_ids' => $target_ids
+                ]);
+                continue;
+            }
+        }
+        
+        // Check rule type conditions
+        if ($rule->rule_type === '商品SKU') {
+            if (empty($rule->sku_list)) {
+                M_xwz_debug_log('Rule skipped - empty SKU list', [
+                    'rule_id' => $rule->id,
+                    'rule_name' => $rule->rule_name
+                ]);
+                continue;
+            }
+            
+          // Clean and prepare SKU list - handle both Chinese and regular commas
+$sku_list = array_filter(
+    array_map('trim', 
+    preg_split('/[,，]/u', $rule->sku_list)
+));
+            $current_sku = strtoupper($sku);
+            $sku_list = array_map('strtoupper', $sku_list);
+            
+            if (!in_array($current_sku, $sku_list)) {
+                M_xwz_debug_log('Rule skipped - SKU not in list', [
+                    'sku' => $sku,
+                    'sku_list' => $sku_list
+                ]);
+                continue;
+            }
+            
+            M_xwz_debug_log('SKU rule matched', [
+                'rule_id' => $rule->id,
+                'sku' => $sku,
+                'adjustment_type' => $rule->adjustment_type,
+                'adjustment_value' => $rule->adjustment_value
+            ]);
+        } else if ($rule->rule_type === '价格区间') {
+            // Get partner price for checking price range
+            $partner_price = $wpdb->get_var($wpdb->prepare(
+                "SELECT partner_price FROM {$wpdb->prefix}supplier_stock WHERE sku = %s LIMIT 1",
+                $sku
+            ));
+            
+            if (!$partner_price) {
+                M_xwz_debug_log('Rule skipped - partner price not found', [
+                    'sku' => $sku,
+                    'rule_id' => $rule->id
+                ]);
+                continue;
+            }
+
+            if ($partner_price < $rule->price_min || 
+                ($rule->price_max > 0 && $partner_price > $rule->price_max)) {
+                M_xwz_debug_log('Rule skipped - price out of range', [
+                    'partner_price' => $partner_price,
+                    'min' => $rule->price_min,
+                    'max' => $rule->price_max
+                ]);
+                continue;
+            }
+
+            M_xwz_debug_log('Price range rule matched', [
+                'rule_id' => $rule->id,
+                'partner_price' => $partner_price,
+                'min' => $rule->price_min,
+                'max' => $rule->price_max
+            ]);
+        }
+        
+        // Apply price adjustment
+        $old_price = $adjusted_price;
+        
+        // Calculate adjustment based on original list price
+        if ($rule->adjustment_type === '固定金额') {
+            $adjustment = $rule->adjustment_value;
+        } else { // percentage
+            $adjustment = $list_price * ($rule->adjustment_value / 100);
+        }
+        
+        $adjusted_price += $adjustment;
+        
+        M_xwz_debug_log('Applied price adjustment', [
+            'rule_id' => $rule->id,
+            'rule_name' => $rule->rule_name,
+            'old_price' => $old_price,
+            'adjustment' => $adjustment,
+            'new_price' => $adjusted_price,
+            'adjustment_type' => $rule->adjustment_type,
+            'adjustment_value' => $rule->adjustment_value
+        ]);
+    }
+    
+ $final_price = max(0, $adjusted_price);
+// Round to nearest 10
+$rounded_price = round($final_price / 10) * 10;
+
+M_xwz_debug_log('Final price calculation complete', [
+    'original_price' => $list_price,
+    'pre_rounded_price' => $final_price,
+    'final_price' => $rounded_price
+]);
+
+return $rounded_price;
+}
+// 获取调整后的List价格
+function M_xwz_get_final_adjusted_price($base_price, $sku, $user_id = null, $seller_id = 0, $room_id = 0) {
+    global $wpdb;
+    
+    M_xwz_debug_log('Starting final price calculation', [
+        'base_price' => $base_price,
+        'sku' => $sku,
+        'user_id' => $user_id,
+        'seller_id' => $seller_id,
+        'room_id' => $room_id
+    ]);
+    
+    // First apply global/seller/room adjustments
+    $price_after_global = M_xwz_get_adjusted_price($base_price, 'list', $sku, $seller_id, $room_id);
+    
+    M_xwz_debug_log('Price after global rules', [
+        'price' => $price_after_global
+    ]);
+    
+    // Then apply user-specific rules if we have a user
+    if (!$user_id) {
+        $user_id = get_current_user_id();
+    }
+    
+    if ($user_id) {
+        $final_price = M_xwz_apply_user_list_price_rules($price_after_global, $user_id, $sku);
+        M_xwz_debug_log('Price after user rules', [
+            'price' => $final_price
+        ]);
+        return $final_price;
+    }
+    
+    return $price_after_global;
+}
+
+// Keep the old function name for backward compatibility
+function M_xwz_get_adjusted_list_price($base_price, $sku, $user_id = null) {
+    return M_xwz_get_final_adjusted_price($base_price, $sku, $user_id);
+}
+
+// Filter for displaying list price
+add_filter('m_xwz_display_list_price', function($price, $sku) {
+    M_xwz_debug_log('Display list price filter called', [
+        'price' => $price,
+        'sku' => $sku
+    ]);
+    
+    $adjusted_price = M_xwz_get_adjusted_list_price($price, $sku);
+    
+    if ($adjusted_price != $price) {
+        M_xwz_debug_log('Price adjusted', [
+            'original' => $price,
+            'adjusted' => $adjusted_price
+        ]);
+        
+        return sprintf(
+            '<input type="number" step="0.01" name="list_price" value="%s"%s>' .
+            '<br><small style="color:blue">规则调整后: %s</small>',
+            esc_attr($price),
+            current_user_can('edit_posts') ? '' : ' readonly',
+            esc_html(number_format($adjusted_price, 2))
+        );
+    }
+    
+    return sprintf(
+        '<input type="number" step="0.01" name="list_price" value="%s"%s>',
+        esc_attr($price),
+        current_user_can('edit_posts') ? '' : ' readonly'
+    );
+}, 10, 2);
+
+// Hook for modifying supplier stock display
+add_filter('m_xwz_supplier_stock_display', 'M_xwz_modify_supplier_stock_display', 10, 2);
+function M_xwz_modify_supplier_stock_display($content, $p) {
+    if (isset($p->list_price)) {
+        $adjusted_price = M_xwz_get_adjusted_list_price($p->list_price, $p->sku);
+        if ($adjusted_price != $p->list_price) {
+            M_xwz_debug_log('Modifying stock display', [
+                'sku' => $p->sku,
+                'original' => $p->list_price,
+                'adjusted' => $adjusted_price
+            ]);
+            
+            return $content . '<br><small style="color:blue">规则调整后: ' . 
+                   esc_html(number_format($adjusted_price, 2)) . '</small>';
+        }
+    }
+    return $content;
+}
+
+// Hook for saving supplier stock
+add_filter('m_xwz_before_save_supplier_stock', 'M_xwz_before_save_supplier_stock', 10, 1);
+function M_xwz_before_save_supplier_stock($data) {
+    M_xwz_debug_log('Saving supplier stock', $data);
+    return $data;
+}
+
+// Get final list price
+function M_xwz_get_final_list_price($sku, $user_id = null) {
+    global $wpdb;
+    $supplier_stock_table = $wpdb->prefix . 'supplier_stock';
+    
+    M_xwz_debug_log('Getting final list price', [
+        'sku' => $sku,
+        'user_id' => $user_id
+    ]);
+    
+    $base_price = $wpdb->get_var($wpdb->prepare(
+        "SELECT list_price FROM $supplier_stock_table WHERE sku = %s",
+        $sku
+    ));
+    
+    if (!$base_price) {
+        M_xwz_debug_log('No base price found for SKU', $sku);
+        return 0;
+    }
+    
+    return M_xwz_get_adjusted_list_price($base_price, $sku, $user_id);
+}
+
+// Hook for front-end price display
+add_filter('m_xwz_get_product_list_price', function($price, $sku) {
+    M_xwz_debug_log('Getting product list price', [
+        'original_price' => $price,
+        'sku' => $sku
+    ]);
+    return M_xwz_get_final_list_price($sku);
+}, 10, 2);
+
+// Family ID field in user profile
+add_action('show_user_profile', 'M_xwz_show_family_id_field');
+add_action('edit_user_profile', 'M_xwz_show_family_id_field');
+function M_xwz_show_family_id_field($user) {
+    if (!current_user_can('manage_options')) {return;
+    }
+    
+    $family_id = M_xwz_get_user_family_id($user->ID);
+    ?>
+    <h3>用户Family ID设置</h3>
+    <table class="form-table">
+        <tr>
+            <th><label for="family_id">Family ID</label></th>
+            <td>
+                <input type="number" name="family_id" id="family_id" value="<?php echo esc_attr($family_id); ?>" class="regular-text">
+                <p class="description">用于价格规则分组的Family ID</p>
+            </td>
+        </tr>
+    </table>
+    <?php
+}
+
+// Save Family ID
+add_action('personal_options_update', 'M_xwz_save_family_id_field');
+add_action('edit_user_profile_update', 'M_xwz_save_family_id_field');
+function M_xwz_save_family_id_field($user_id) {
+    if (!current_user_can('manage_options')) {
+        return false;
+    }
+    
+    if (isset($_POST['family_id'])) {
+        $family_id = intval($_POST['family_id']);
+        M_xwz_debug_log('Saving family ID', [
+            'user_id' => $user_id,
+            'family_id' => $family_id
+        ]);
+        update_user_meta($user_id, 'family_id', $family_id);
+    }
+}	
+	
+	
+	
+	
+// Disable WordPress update checks and related functionality
+function M_xwz_disable_wp_updates() {
+    // Core updates
+    add_filter('pre_site_transient_update_core', '__return_null');
+    add_filter('pre_transient_update_core', '__return_null');
+    
+    // Plugin updates
+    add_filter('pre_site_transient_update_plugins', '__return_null');
+    add_filter('pre_transient_update_plugins', '__return_null');
+    
+    // Theme updates
+    add_filter('pre_site_transient_update_themes', '__return_null');
+    add_filter('pre_transient_update_themes', '__return_null');
+    
+    // HTTP requests
+    add_filter('pre_http_request', function($preempt, $parsed_args, $url) {
+        if (strpos($url, 'api.wordpress.org') !== false) {
+            return true;
+        }
+        return $preempt;
+    }, 10, 3);
+}
+add_action('init', 'M_xwz_disable_wp_updates');
+
+// Remove update nags
+add_action('admin_init', function() {
+    remove_action('admin_notices', 'update_nag', 3);
+    remove_action('admin_notices', 'maintenance_nag', 10);
+});
+
+// Debug switch - Set to true to enable debugging
+define('M_XWZ_PRICE_RULES_DEBUG', false);
+
+// Debug logging function
+function M_xwz_debug_log($message, $data = null) {
+    if (!M_XWZ_PRICE_RULES_DEBUG) {
+        return;
+    }
+    
+    $debug_output = '[Price Rules Debug] ' . $message;
+    if ($data !== null) {
+        if (is_array($data) || is_object($data)) {
+            $debug_output .= ': ' . print_r($data, true);
+        } else {
+            $debug_output .= ': ' . $data;
+        }
+    }
+    
+    // Log to WordPress debug log
+    error_log($debug_output);
+    
+    // Display in admin area if we're there
+    if (is_admin()) {
+        echo '<div class="notice notice-info is-dismissible"><p>' . esc_html($debug_output) . '</p></div>';
+    }
+}
+
+// 创建所需表格
+register_activation_hook(__FILE__, 'M_xwz_create_user_pricing_rules_table');
+function M_xwz_create_user_pricing_rules_table() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'user_list_price_rules';
+    
+    M_xwz_debug_log('Creating/checking table', $table_name);
+    
+    $charset_collate = $wpdb->get_charset_collate();
+    
+    $sql = "CREATE TABLE IF NOT EXISTS $table_name (
+        id bigint(20) NOT NULL AUTO_INCREMENT,
+        rule_name varchar(255) NOT NULL,
+        rule_type enum('商品SKU','价格区间','全局固定') NOT NULL,
+        target_type enum('用户','家庭组') NOT NULL,
+        target_ids text,
+        sku_list text,
+        excluded_skus text,
+        price_min decimal(10,2),
+        price_max decimal(10,2),
+        adjustment_type enum('固定金额','百分比') NOT NULL,
+        adjustment_value decimal(10,2) NOT NULL,
+        priority int NOT NULL DEFAULT 100,
+        is_active tinyint(1) NOT NULL DEFAULT 1,
+        created_at datetime DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id)
+    ) $charset_collate;";
+    
+    require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
+    dbDelta($sql);
+    
+    if ($wpdb->last_error) {
+        M_xwz_debug_log('Table creation error', $wpdb->last_error);
+    } else {
+        M_xwz_debug_log('Table created/checked successfully');
+    }
+}
+// 添加管理菜单
+add_action('admin_menu', 'M_xwz_add_user_pricing_menu');
+function M_xwz_add_user_pricing_menu() {
+    add_menu_page(
+        '用户List价格规则',
+        '用户List价格规则',
+        'manage_options',
+        'user_list_price_rules',
+        'M_xwz_user_pricing_rules_page',
+        'dashicons-money-alt',
+        58
+    );
+}
+function M_xwz_update_pricing_rules_table() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'user_list_price_rules';
+    
+    // First check if the column exists
+    $column_exists = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
+        WHERE TABLE_SCHEMA = %s 
+        AND TABLE_NAME = %s 
+        AND COLUMN_NAME = 'excluded_skus'",
+        DB_NAME,
+        $table_name
+    ));
+    
+    if (empty($column_exists)) {
+        // Add the column if it doesn't exist
+        $wpdb->query("ALTER TABLE $table_name ADD COLUMN excluded_skus text AFTER sku_list");
+        M_xwz_debug_log('Added excluded_skus column');
+    }
+}
+
+// Update hook
+register_activation_hook(__FILE__, 'M_xwz_update_pricing_rules_table');
+
+// Also run it on init to ensure the column exists
+add_action('init', 'M_xwz_update_pricing_rules_table');
+// 获取用户的family_id
+function M_xwz_get_user_family_id($user_id) {
+    global $wpdb;
+    $family_id = $wpdb->get_var($wpdb->prepare(
+        "SELECT meta_value FROM {$wpdb->prefix}usermeta WHERE user_id = %d AND meta_key = 'family_id'",
+        $user_id
+    ));
+    return $family_id ? $family_id : 0;
+}
+
+// 主管理页面函数
+function M_xwz_user_pricing_rules_page() {
+    global $wpdb;
+    $table_name = $wpdb->prefix . 'user_list_price_rules';
+    
+    // Debug: Check if table exists
+    $table_exists = $wpdb->get_var("SHOW TABLES LIKE '$table_name'");
+    if (!$table_exists) {
+        M_xwz_debug_log('Table does not exist, creating now...');
+        M_xwz_create_user_pricing_rules_table();
+    }
+    
+    // 处理删除请求
+    // 处理删除请求
+if (isset($_GET['action']) && $_GET['action'] === 'delete' && isset($_GET['rule_id'])) {
+    try {
+        $rule_id = intval($_GET['rule_id']);
+        
+        // Verify nonce
+        check_admin_referer('delete_rule_' . $rule_id);
+        
+        // Attempt deletion
+        $deleted = $wpdb->delete($table_name, ['id' => $rule_id], ['%d']);
+        
+        if ($deleted === false) {
+            throw new Exception('删除规则时发生数据库错误。');
+        }
+        
+        M_xwz_debug_log('Rule deleted successfully', $rule_id);
+        
+        // Redirect with success message
+        wp_redirect(add_query_arg(
+            ['page' => 'user_list_price_rules', 'deleted' => '1'],
+            admin_url('admin.php')
+        ));
+        exit;
+        
+    } catch (Exception $e) {
+        M_xwz_debug_log('Delete rule error', $e->getMessage());
+        wp_die($e->getMessage(), '删除错误', ['response' => 403, 'back_link' => true]);
+    }
+}
+
+// Show success message after redirect
+if (isset($_GET['deleted'])) {
+    echo '<div class="notice notice-success is-dismissible"><p>规则已成功删除！</p></div>';
+}
+
+    // 获取要编辑的规则
+    $editing_rule = null;
+    if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['rule_id'])) {
+        $rule_id = intval($_GET['rule_id']);
+        $editing_rule = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $table_name WHERE id = %d",
+            $rule_id
+        ));
+        M_xwz_debug_log('Editing rule', $editing_rule);
+    }
+    
+    // 处理添加/编辑请求
+ // 处理添加/编辑请求
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_rule'])) {
+    try {
+        // Verify nonce
+       // Verify nonce with more detailed error handling
+try {
+    if (!isset($_POST['_wpnonce'])) {
+        throw new Exception('缺少安全验证令牌。');
+    }
+    
+    if (!wp_verify_nonce($_POST['_wpnonce'], 'add_user_pricing_rule')) {
+        throw new Exception('安全验证令牌无效或已过期。请刷新页面重试。');
+    }
+} catch (Exception $e) {
+    M_xwz_debug_log('Nonce verification failed', $_POST['_wpnonce']);
+    throw $e;
+}
+        
+        // Validate required fields
+        $required_fields = ['rule_name', 'rule_type', 'target_type', 'target_ids', 'adjustment_type', 'adjustment_value'];
+        foreach ($required_fields as $field) {
+            if (empty($_POST[$field])) {
+                throw new Exception("必填字段 '{$field}' 为空。");
+            }
+        }
+        
+        // Build rule data with validation
+        $rule_data = [
+            'rule_name' => sanitize_text_field($_POST['rule_name']),
+            'rule_type' => sanitize_text_field($_POST['rule_type']),
+            'target_type' => sanitize_text_field($_POST['target_type']),
+            'target_ids' => sanitize_text_field($_POST['target_ids']),
+            'adjustment_type' => sanitize_text_field($_POST['adjustment_type']),
+            'adjustment_value' => floatval($_POST['adjustment_value']),
+            'priority' => !empty($_POST['priority']) ? intval($_POST['priority']) : 100,
+            'is_active' => isset($_POST['is_active']) ? 1 : 0,
+            'excluded_skus' => sanitize_text_field($_POST['excluded_skus'] ?? '')
+        ];
+
+        // Validate rule type specific fields
+        if ($rule_data['rule_type'] === '商品SKU') {
+    if (empty($_POST['sku_list'])) {
+        throw new Exception('SKU列表不能为空。');
+    }
+    // Clean and validate SKU list
+    $skus = array_filter(array_map('trim', explode(',', $_POST['sku_list'])));
+    if (empty($skus)) {
+        throw new Exception('SKU列表格式无效。');
+    }
+    $rule_data['sku_list'] = implode(',', $skus);
+} elseif ($rule_data['rule_type'] === '价格区间') {
+            $rule_data['price_min'] = !empty($_POST['price_min']) ? floatval($_POST['price_min']) : 0;
+            $rule_data['price_max'] = !empty($_POST['price_max']) ? floatval($_POST['price_max']) : 0;
+            
+            if ($rule_data['price_max'] > 0 && $rule_data['price_max'] < $rule_data['price_min']) {
+                throw new Exception('最高价格不能小于最低价格。');
+            }
+        }
+
+        M_xwz_debug_log('Adding/updating rule with data', $rule_data);
+
+        // Insert or update rule
+        if (isset($_POST['rule_id'])) {
+            $result = $wpdb->update(
+                $table_name, 
+                $rule_data, 
+                ['id' => intval($_POST['rule_id'])]
+            );
+            $message = '规则已更新！';
+        } else {
+            $result = $wpdb->insert($table_name, $rule_data);
+            $message = '规则已添加！ID: ' . $wpdb->insert_id;
+        }
+
+        if ($result === false) {
+            throw new Exception($wpdb->last_error);
+        }
+
+        echo '<div class="notice notice-success"><p>' . esc_html($message) . '</p></div>';
+        
+    } catch (Exception $e) {
+        M_xwz_debug_log('Error adding/updating rule', $e->getMessage());
+        echo '<div class="notice notice-error"><p>错误：' . esc_html($e->getMessage()) . '</p></div>';
+    }
+}
+        
+        // 基于规则类型添加条件字段
+    
+    
+    // 获取现有规则
+    $rules = $wpdb->get_results("SELECT * FROM $table_name ORDER BY priority ASC, id ASC");
+    M_xwz_debug_log('Retrieved rules', count($rules));
+    
+    // 显示管理界面
+    ?>
+    <div class="wrap">
+        <h1><?php echo $editing_rule ? '编辑规则' : '用户List价格规则管理'; ?></h1>
+        
+        <form method="post" action="">
+    <?php 
+    // Generate nonce for form submission
+    wp_nonce_field('add_user_pricing_rule', '_wpnonce', true, true);
+    ?>
+            <?php if ($editing_rule): ?>
+                <input type="hidden" name="rule_id" value="<?php echo esc_attr($editing_rule->id); ?>">
+            <?php endif; ?>
+            
+            <table class="form-table">
+                <tr>
+                    <th>规则名称</th>
+                    <td><input type="text" name="rule_name" value="<?php echo $editing_rule ? esc_attr($editing_rule->rule_name) : ''; ?>" required></td>
+                </tr>
+                <tr>
+                    <th>规则类型</th>
+                    <td>
+                        <select name="rule_type" id="rule_type" required>
+                            <option value="商品SKU">指定SKU</option>
+                            <option value="价格区间">价格区间</option>
+                            <option value="全局固定">全部商品固定调整</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th>目标类型</th>
+                    <td>
+                        <select name="target_type" required>
+                            <option value="用户">指定用户</option>
+                            <option value="家庭组">家庭组ID</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th>目标ID</th>
+                    <td>
+                        <input type="text" name="target_ids" value="<?php echo $editing_rule ? esc_attr($editing_rule->target_ids) : ''; ?>" required>
+                        <p class="description">多个ID请用英文逗号分隔</p>
+                    </td>
+                </tr>
+                <tr class="sku-specific">
+                    <th>SKU列表</th>
+                    <td>
+                        <input type="text" name="sku_list" value="<?php echo $editing_rule ? esc_attr($editing_rule->sku_list) : ''; ?>">
+                        <p class="description">多个SKU请用英文逗号分隔</p>
+                    </td>
+                </tr>
+                <tr class="excluded-skus">
+                    <th>排除的SKU</th>
+                    <td>
+                        <input type="text" name="excluded_skus" value="<?php echo $editing_rule ? esc_attr($editing_rule->excluded_skus) : ''; ?>">
+                        <p class="description">这些SKU将不受规则影响，多个SKU请用英文逗号分隔</p>
+                    </td>
+                </tr>
+                <tr class="price-range">
+                    <th>价格区间</th>
+                    <td>
+                        最低: <input type="number" step="0.01" name="price_min" value="<?php echo $editing_rule ? esc_attr($editing_rule->price_min) : ''; ?>">
+                        最高: <input type="number" step="0.01" name="price_max" value="<?php echo $editing_rule ? esc_attr($editing_rule->price_max) : ''; ?>">
+                    </td>
+                </tr>
+                <tr>
+                    <th>调整类型</th>
+                    <td>
+                        <select name="adjustment_type" required>
+                            <option value="固定金额">固定金额</option>
+                            <option value="百分比">百分比</option>
+                        </select>
+                    </td>
+                </tr>
+                <tr>
+                    <th>调整值</th>
+                    <td>
+                        <input type="number" step="0.01" name="adjustment_value" value="<?php echo $editing_rule ? esc_attr($editing_rule->adjustment_value) : ''; ?>" required>
+                        <p class="description">固定金额直接输入数值，百分比输入正数表示增加，负数表示减少</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>优先级</th>
+                    <td>
+                        <input type="number" name="priority" value="<?php echo $editing_rule ? esc_attr($editing_rule->priority) : '100'; ?>" required>
+                        <p class="description">数字越小优先级越高</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th>是否启用</th>
+                    <td><input type="checkbox" name="is_active" <?php echo (!$editing_rule || $editing_rule->is_active) ? 'checked' : ''; ?>></td>
+                </tr>
+            </table>
+            
+            <?php if ($editing_rule): ?>
+                <input type="submit" name="add_rule" class="button button-primary" value="更新规则">
+                <a href="<?php echo esc_url(admin_url('admin.php?page=user_list_price_rules')); ?>" class="button">取消编辑</a>
+            <?php else: ?>
+                <input type="submit" name="add_rule" class="button button-primary" value="添加规则">
+            <?php endif; ?>
+        </form>
+
+        <script>
+        jQuery(document).ready(function($) {
+            function toggleFields() {
+                var ruleType = $('#rule_type').val();
+                $('.sku-specific, .price-range, .excluded-skus').hide();
+             if (ruleType === '商品SKU') {
+                    $('.sku-specific, .excluded-skus').show();
+                } else if (ruleType === '价格区间') {
+                    $('.price-range, .excluded-skus').show();
+                } else {
+                    $('.excluded-skus').show();
+                }
+            }
+            
+            $('#rule_type').on('change', toggleFields);
+            toggleFields();
+            
+            // 删除规则确认
+            // 删除规则确认
+$('.delete-rule').on('click', function(e) {
+    e.preventDefault();
+    if (confirm('确定要删除这条规则吗？')) {
+        window.location.href = $(this).attr('href');
+    }
+});
+
+            // 如果是编辑模式，设置表单的值
+            <?php if ($editing_rule): ?>
+            $('#rule_type').val('<?php echo esc_js($editing_rule->rule_type); ?>').trigger('change');
+            $('select[name="target_type"]').val('<?php echo esc_js($editing_rule->target_type); ?>');
+            $('select[name="adjustment_type"]').val('<?php echo esc_js($editing_rule->adjustment_type); ?>');
+            <?php endif; ?>
+        });
+        </script>
+
+    <?php if ($rules): ?>
+    <div class="wrap">
+        <h2 class="wp-heading-inline">现有规则</h2>
+        <table class="wp-list-table widefat fixed striped">
+            <thead>
+                <tr>
+                    <th width="5%">ID</th>
+                    <th width="20%">规则名称</th>
+                    <th width="15%">目标类型</th>
+                    <th width="20%">目标</th>
+                    <th width="20%">调整方式</th>
+                    <th width="10%">状态</th>
+                    <th width="10%">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($rules as $rule): ?>
+                    <tr>
+                        <td>
+                            <?php echo esc_html($rule->id); ?>
+                        </td>
+                        <td>
+                            <strong><?php echo esc_html($rule->rule_name); ?></strong>
+                            <br>
+                            <small>优先级: <?php echo esc_html($rule->priority); ?></small>
+                        </td>
+                        <td>
+                            <?php 
+                            echo esc_html($rule->rule_type);
+                            if ($rule->rule_type === '价格区间') {
+                                echo '<br><small>区间: ';
+                                echo '¥' . number_format($rule->price_min, 2);
+                                echo ' ~ ';
+                                echo !empty($rule->price_max) ? '¥' . number_format($rule->price_max, 2) : '无限制';
+                                echo '</small>';
+                            }
+                            ?>
+                        </td>
+                        <td>
+                            <?php 
+                            echo '<strong>' . esc_html($rule->target_type) . '</strong><br>';
+                            $ids = explode(',', $rule->target_ids);
+                            foreach ($ids as $id) {
+                                $id = trim($id);
+                                if ($rule->target_type === '用户') {
+                                    $user = get_userdata($id);
+                                    echo '<small>';
+                                    echo $user ? esc_html($user->user_login) . ' (' . $id . ')' : $id;
+                                    echo '</small><br>';
+                                } else {
+                                    echo '<small>组ID: ' . esc_html($id) . '</small><br>';
+                                }
+                            }
+                            if (!empty($rule->excluded_skus)) {
+                                echo '<small class="excluded">排除: ' . esc_html($rule->excluded_skus) . '</small>';
+                            }
+                            ?>
+                        </td>
+                        <td>
+                            <?php
+                            echo '<strong>' . esc_html($rule->adjustment_type) . '</strong><br>';
+                            if ($rule->adjustment_type === '固定金额') {
+                                echo '<span style="color: ' . ($rule->adjustment_value >= 0 ? '#46b450' : '#dc3232') . '">';
+                                echo '¥' . number_format(abs($rule->adjustment_value), 2);
+                                echo ($rule->adjustment_value >= 0 ? ' (+)' : ' (-)');
+                                echo '</span>';
+                            } else {
+                                echo '<span style="color: ' . ($rule->adjustment_value >= 0 ? '#46b450' : '#dc3232') . '">';
+                                echo number_format($rule->adjustment_value, 2) . '%';
+                                echo '</span>';
+                            }
+                            ?>
+                        </td>
+                        <td>
+                            <span style="color: <?php echo $rule->is_active ? '#46b450' : '#dc3232'; ?>">
+                                <?php echo $rule->is_active ? '✓ 启用' : '✗ 禁用'; ?>
+                            </span>
+                        </td>
+                        <td>
+                            <?php
+                            $edit_url = add_query_arg([
+                                'action' => 'edit',
+                                'rule_id' => $rule->id,
+                                'page' => 'user_list_price_rules'
+                            ], admin_url('admin.php'));
+                            
+                            $delete_url = wp_nonce_url(
+                                add_query_arg([
+                                    'action' => 'delete',
+                                    'rule_id' => $rule->id,
+                                    'page' => 'user_list_price_rules'
+                                ], admin_url('admin.php')),
+                                'delete_rule_' . $rule->id
+                            );
+                            ?>
+                            <div class="row-actions visible">
+                                <a href="<?php echo esc_url($edit_url); ?>" 
+                                   class="button button-small">编辑</a>
+                                <a href="<?php echo esc_url($delete_url); ?>" 
+                                   class="button button-small delete-rule">删除</a>
+                            </div>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+
+    <style>
+        .wp-list-table td {
+            vertical-align: top;
+            padding: 8px;
+        }
+        .row-actions {
+            display: flex;
+            gap: 4px;
+            padding: 2px 0;
+        }
+        .excluded {
+            color: #ca4a1f;
+            display: block;
+            margin-top: 4px;
+        }
+        .wp-list-table small {
+            color: #666;
+            display: block;
+            line-height: 1.5;
+        }
+    </style>
+<?php else: ?>
+    <p>暂无规则。</p>
+<?php endif; ?>
+
+    </div>
+<?php
+}
