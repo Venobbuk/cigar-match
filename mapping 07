@@ -1,0 +1,3093 @@
+/**
+ * KT Cigar Mappings - Advanced Brand and Series Recognition
+ * Contains comprehensive mappings and pattern recognition for cigar brands and series
+ * Enhanced with more robust pattern matching and intelligent scoring algorithms
+ *
+ * Version: 5.0.0 - Enhanced Keyword Categorization and Brand-Strict Matching
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// Configurable weights for matching categories - EASILY ADJUSTABLE
+define('KT_CIGAR_WEIGHT_BRAND', 45);           // Brand is most important
+define('KT_CIGAR_WEIGHT_MODEL', 30);           // Series/Model is second
+define('KT_CIGAR_WEIGHT_VITOLA', 20);          // Size/Vitola is third
+define('KT_CIGAR_WEIGHT_DIMENSION', 25);       // Dimensions are important
+define('KT_CIGAR_WEIGHT_SPECIAL_EDITION', 15); // Special editions
+define('KT_CIGAR_WEIGHT_YEAR', 10);            // Year matching
+define('KT_CIGAR_WEIGHT_COUNT', 10);           // Count matching
+define('KT_CIGAR_WEIGHT_PACKAGING', 5);        // Packaging
+define('KT_CIGAR_WEIGHT_KEYWORDS', 25);        // General keywords
+define('KT_CIGAR_WEIGHT_REGIONAL', 8);         // Regional/distributor
+
+// Cache settings
+define('KT_CIGAR_CACHE_EXPIRY', 3600);         // 1 hour cache
+define('KT_CIGAR_BATCH_SIZE', 50);             // Process 50 products at a time
+
+/**
+ * KT_Cigar_Debug - Custom debug logging for the cigar matching system
+ * Provides detailed logging of matching operations to help troubleshoot issues
+ */
+class KT_Cigar_Debug {
+    // Debug log file path
+    private static $log_file = '';
+    
+    // Debug level
+    private static $debug_level = 0; // 0 = off, 1 = errors only, 2 = basic info, 3 = verbose
+    
+    // Max log file size (2MB)
+    private static $max_log_size = 2097152;
+    
+    // Initialize debug system
+    public static function init($log_file = '', $debug_level = 2) {
+        // Set log file location (default to plugin directory if not specified)
+        if (empty($log_file)) {
+            $upload_dir = wp_upload_dir();
+            self::$log_file = $upload_dir['basedir'] . '/cigar_matcher_debug.log';
+        } else {
+            self::$log_file = $log_file;
+        }
+        
+        self::$debug_level = $debug_level;
+        
+        // Check if log file exists and exceeds size limit
+        if (file_exists(self::$log_file) && filesize(self::$log_file) > self::$max_log_size) {
+            self::rotate_log();
+        }
+        
+        // Create log file if it doesn't exist
+        if (!file_exists(self::$log_file) && self::$debug_level > 0) {
+            self::log_header();
+        }
+        
+        // Test log file writability
+        if (self::$debug_level > 0) {
+            $test_write = @file_put_contents(self::$log_file, "", FILE_APPEND);
+            if ($test_write === false) {
+                error_log("KT_Cigar_Debug: Unable to write to log file at " . self::$log_file);
+                // Try to create log file in system temp directory as fallback
+                $temp_dir = sys_get_temp_dir();
+                self::$log_file = $temp_dir . '/cigar_matcher_debug.log';
+                self::log_header();
+            }
+        }
+    }
+    
+    // Rotate log file (keep last 100KB of log)
+    private static function rotate_log() {
+        if (file_exists(self::$log_file)) {
+            $content = @file_get_contents(self::$log_file);
+            if ($content !== false) {
+                // Keep only the last 100KB of the log
+                $content = substr($content, -102400);
+                @file_put_contents(self::$log_file, "--- LOG ROTATED DUE TO SIZE [" . date('Y-m-d H:i:s') . "] ---\n" . $content);
+            }
+        }
+    }
+    
+    // Write header to log file
+    private static function log_header() {
+        $header = "=======================================================\n";
+        $header .= "KT Cigar Matcher Debug Log - Started: " . date('Y-m-d H:i:s') . "\n";
+        $header .= "PHP Version: " . PHP_VERSION . " | OS: " . PHP_OS . "\n";
+        $header .= "=======================================================\n\n";
+        @file_put_contents(self::$log_file, $header);
+    }
+    
+    // Log a message with timestamp
+    public static function log($message, $level = 2, $context = '') {
+        if (self::$debug_level < $level || self::$debug_level == 0) {
+            return; // Skip if debug level is lower than message level
+        }
+        
+        // Check file size before logging
+        if (file_exists(self::$log_file) && filesize(self::$log_file) > self::$max_log_size) {
+            self::rotate_log();
+        }
+        
+        if (!empty($context)) {
+            $context = "[$context] ";
+        }
+        
+        $log_entry = date('Y-m-d H:i:s') . " {$context}{$message}\n";
+        $result = @file_put_contents(self::$log_file, $log_entry, FILE_APPEND);
+        
+        // If we couldn't write to the log, try system error log as last resort
+        if ($result === false) {
+            error_log("KT_Cigar_Matcher: " . $message);
+        }
+    }
+    
+    // Enhanced log match details with keyword categorization
+    public static function log_match($supplier_title, $internal_title, $score, $match_type, $debug_info) {
+        if (self::$debug_level < 2) return;
+        
+        // Check file size before logging
+        if (file_exists(self::$log_file) && filesize(self::$log_file) > self::$max_log_size) {
+            self::rotate_log();
+        }
+        
+        // First line: Basic match info
+        $log_entry = "MATCH: " . mb_substr($supplier_title, 0, 30) . " => " . 
+                     mb_substr($internal_title, 0, 30) . " | " . 
+                     round($score, 1) . "% ($match_type)";
+        
+        // Add categorized keywords if available
+        if (isset($debug_info['categorized_keywords'])) {
+            $categories = $debug_info['categorized_keywords'];
+            $log_entry .= "\n       Keywords: ";
+            foreach ($categories as $category => $keywords) {
+                if (!empty($keywords)) {
+                    $log_entry .= "$category(" . count($keywords) . ") ";
+                }
+            }
+        }
+        
+        // Add cache info if available
+        if (isset($debug_info['cache_status'])) {
+            $log_entry .= " | Cache: " . $debug_info['cache_status'];
+        }
+        
+        @file_put_contents(self::$log_file, $log_entry . "\n", FILE_APPEND);
+    }
+    
+    // Clear log file
+    public static function clear_log() {
+        if (file_exists(self::$log_file)) {
+            @unlink(self::$log_file);
+            self::log_header();
+        }
+    }
+}
+
+// static data 9999
+// 
+// 
+class KT_Cigar_Mappings {
+    // Filter words that don't help in matching
+    private static $common_filter_words = array(
+        // Basic Chinese filter words
+        '盒', '盒装', 'box', '装', '只', '支', '五只', '五支', '三只', '三支', 
+        '四只', '四支', 'pcs', '片', '条', '整盒', '整箱', '带盒', '带管', 
+        '铝管装', '礼盒', '普通装', '单支', '裸支', '非卖品', '定制', '茄', 
+        '雪茄', 'cigar', 'cigars', '烟', '单盒', '高端', '限量', '限定', '特殊', 
+        '特制', '精选', '厂家', '正品', '产品', '精美', '小', '大', '中号', '特号', 
+        '产地', '古巴', '古代', 'cuba', '全球', '包邮', '正品', '原装', '现货', 
+        '新品', '无盒', '年', '年份', '打火机', 
+        // Additional Chinese filter words
+        '正宗', '进口', '原厂', '手工', '传统', '珍藏', '稀有', '收藏', '经典',
+        '香味', '口感', '香气', '味道', '醇厚', '浓郁', '清淡', '顺滑', '复杂',
+        '平衡', '均衡', '层次', '丰富', '细腻', '圆润', '柔和', '强烈', '温和',
+        '烟丝', '烟叶', '烟草', '烟根', '烟身', '烟头', '烟尾', '烟灰', '烟斗',
+        '烟嘴', '烟道', '烟油', '香烟', '雪茄烟', '雪茄店', '雪茄馆', '雪茄吧',
+        // English common words
+        'the', 'and', 'for', 'with', 'from', 'this', 'that', 'these', 'those', 
+        'of', 'in', 'on', 'at', 'by', 'to', 'a', 'an', 'it', 'is', 'are', 'was', 
+        // Chinese common words
+        '有', '是', '的', '了', '在', '和', '与', '或', '不', '很', '也', '就',
+        '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们', '它们',
+        '这', '那', '这些', '那些', '这个', '那个', '什么', '为什么', '怎么',
+        '如何', '何时', '何地', '何人', '何物', '何事', '何种', '何样', '多少'
+    );
+
+    /**
+     * Get mappings of Cuban cigar brands with their Chinese variations
+     */
+    public static function get_cuban_brand_mappings() {
+        return array(
+            // Top Cuban Brands with multiple Chinese naming variations
+            'cohiba' => array('高希霸', '科伊巴', '科希巴', '科伊瓦', '科巴', '哥希霸', '哥伊巴', '柯希巴', '可希巴', '寇希巴', 'cohiba'),
+            'montecristo' => array('蒙特', '蒙特克里斯托', '蒙特克里斯多', '蒙特西托', '蒙德克里斯多', '蒙特利斯托', '蒙克', '蒙特克里托', '蒙特利多', '蒙泰克里斯托', 'montecristo', 'monte'),
+            'romeo y julieta' => array('罗密欧', '罗密欧与朱丽叶', '罗密欧朱丽叶', '罗密欧与茱丽叶', '罗密欧茱丽叶', '罗密欧与朱丽叶', '罗密欧朱丽叶', '罗密欧朱利叶', '罗密欧与朱利叶', '罗朱', 'romeo', 'romeo y julieta', 'r&j'),
+            'partagas' => array('帕特加斯', '帕塔加斯', '帕达加斯', '帕塔嘉斯', '帕塔加思', '帕特嘉斯', '巴塔加斯', '帕塔加', '帕达嘉斯', '帕特加', 'partagas'),
+            'h. upmann' => array('优佩曼', '乌普曼', '乌帕曼', '邬普曼', '尤普曼', '乌普曼', '哈瓦那优普曼', '优普曼', '诶查厄普曼', '赫乌普曼', 'h. upmann', 'upmann', 'h upmann'),
+            'hoyo de monterrey' => array('好友', '霍约蒙特雷', '蒙特雷好友', '何友', '好友蒙特雷', '蒙特雷', '好友德蒙特雷', '霍约德蒙特雷', '好友山景', '豪友', 'hoyo', 'hdm'),
+            'bolivar' => array('波利瓦尔', '玻利瓦尔', '博利瓦尔', '玻利瓦', '博利瓦', '波利瓦', '玻利瓦儿', '博利瓦儿', '波利瓦儿', '玻利华尔', 'bolivar'),
+            'trinidad' => array('特立尼达', '特立达', '特立尼达德', '特立尼', '特立尼特', '特立尼达得', '特利尼达', '特利尼', '特利尼特', '特丽尼达', 'trinidad'),
+            'san cristobal de la habana' => array('圣克里斯托巴尔', '圣克里斯托瓦尔', '圣克里斯托', '圣克', '哈瓦那圣克', '圣克里斯多巴尔', '圣克里斯托', '圣克里', '圣科里斯托瓦尔', '圣克里托巴尔', 'san cristobal', 'scl'),
+            'juan lopez' => array('胡安·洛佩兹', '胡安洛佩兹', '胡安·洛佩斯', '胡安洛佩斯', '胡安·洛培兹', '胡安洛培兹', '胡安·洛培斯', '胡安洛培斯', '璜·洛佩兹', '璜洛佩兹', 'juan lopez'),
+            'el rey del mundo' => array('雷伊世界', '世界之王', '雷德蒙多', '雷伊德尔蒙多', '雷伊德尔蒙度', '雷伊德尔蒙道', '雷伊', '世界雷伊', '雷伊世界王', '世界之王雷伊', 'rey del mundo', 'erdm'),
+            'quai d\'orsay' => array('奥赛码头', '多尔塞码头', '多赛码头', '奥尔赛码头', '多赛', '奥赛', '多尔赛', '奥尔塞', '多塞', '奥塞', 'quai dorsay', 'dorsay'),
+            'diplomaticos' => array('外交官', '迪普洛马蒂克斯', '迪普洛马蒂科斯', '迪普洛马蒂', '迪普', '外交', '迪普洛', '迪普洛马', '迪普洛马蒂', '迪普洛马特', 'diplomaticos'),
+            'rafael gonzalez' => array('拉斐尔·冈萨雷斯', '拉菲尔·冈萨雷斯', '拉斐尔冈萨雷斯', '拉菲尔冈萨雷斯', '拉法尔·贡萨勒斯', '拉法尔贡萨勒斯', '拉斐尔·贡萨雷斯', '拉斐尔贡萨雷斯', '拉菲尔', '拉斐尔', 'rafael gonzalez'),
+            'fonseca' => array('丰塞卡', '方塞卡', '丰塞克', '封塞卡', '方塞克', '丰赛卡', '封赛卡', '封世家', '封斯卡', '豐塞卡', 'fonseca'),
+            'sancho panza' => array('桑丘·潘沙', '桑丘潘沙', '桑乔·潘萨', '桑乔潘萨', '桑丘·潘查', '桑丘潘查', '桑乔·潘扎', '桑乔潘扎', '桑丘', '潘沙', 'sancho panza'),
+            'la gloria cubana' => array('古巴荣耀', '古巴光荣', '古巴荣光', '古巴格洛瑞亚', '古巴拉格洛瑞亚', '古巴格洛丽亚', '荣耀古巴', '荣光古巴', '光荣古巴', '拉格洛瑞亚', 'la gloria cubana', 'lgc'),
+            'por larranaga' => array('保拉拉纳加', '波拉拉纳加', '波尔拉纳加', '波尔拉拉那加', '波拉腊那加', '保拉拉那加', '保拉腊那加', '波尔拉腊那加', '拉纳加', '保拉', 'por larranaga'),
+            'quintero' => array('昆特罗', '金特罗', '琴特罗', '坤特罗', '群特罗', '坤特洛', '坤特罗斯', '群塔罗', '昆塔罗', '金塔罗', 'quintero'),
+            'jose l. piedra' => array('何塞·皮德拉', '何塞皮德拉', '霍塞·皮埃德拉', '霍塞皮埃德拉', '何塞·彼德拉', '何塞彼德拉', '霍塞·彼埃德拉', '霍塞彼埃德拉', '皮德拉', '彼德拉', 'jose l piedra', 'jlp'),
+            'vegueros' => array('韦格罗斯', '维格罗斯', '韦格洛斯', '维格洛斯', '韦格', '维格', '韦古罗斯', '维古罗斯', '韦古洛斯', '维古洛斯', 'vegueros'),
+            'punch' => array('潘趣', '潘虚', '潘切', '邦切', '邦趣', '邦虚', '盘趣', '盘虚', '盘切', '潘什', 'punch'),
+            'saint luis rey' => array('圣路易斯雷伊', '圣路易王', '圣路易斯·雷伊', '圣路易斯王', '圣路易王', '圣雷伊', '圣路易士雷伊', '圣路易士王', '圣路易斯', '圣路易', 'saint luis rey', 'slr'),
+            'ramon allones' => array('雷蒙·阿隆尼斯', '雷蒙阿隆尼斯', '莱蒙·阿罗尼斯', '莱蒙阿罗尼斯', '拉蒙·阿隆内斯', '拉蒙阿隆内斯', '雷蒙·阿洛尼斯', '雷蒙阿洛尼斯', '阿隆尼斯', '雷蒙', 'ramon allones'),
+            'cuaba' => array('库阿巴', '古巴巴', '库巴巴', '酷阿巴', '库瓦巴', '酷瓦巴', '库巴', '卡巴', '库阿瓦', '库瓦', 'cuaba'),
+            'vegafina' => array('维加菲纳', '韦加菲纳', '维佳菲娜', '韦佳菲娜', '维加芬娜', '维嘉菲娜', '维佳芬娜', '维嘉芬娜', '菲纳', '维加', 'vegafina')
+        );
+    }
+
+    /**
+     * Get mappings of top non-Cuban cigar brands with their Chinese variations
+     */
+    public static function get_non_cuban_brand_mappings() {
+        return array(
+            // Top non-Cuban brands (Nicaraguan, Dominican, etc.)
+            'padron' => array('帕德龙', '帕德隆', '帕德朗', '帕特龙', '帕特隆', '帕德罗', '帕特罗', '帕德隆', '帕多隆', '帕多龙', '巴德龙', '巴德隆', '巴德朗', '巴特龙', '帕迪龙', '帕迪隆', 'padron', 'padrón'),
+            
+            'arturo fuente' => array('阿图罗·富恩特', '阿图罗富恩特', '阿图罗·符恩特', '阿图罗符恩特', '富恩特', '符恩特', '阿图罗', '阿杜罗·富恩特', '阿杜罗富恩特', '富恩特家族', '阿杜罗富恩特', '亚图罗富恩特', '亚图罗·富恩特', '富安特', '福恩特', '福安特', '富恩德', '富恩蒂', '阿图罗福恩特', 'arturo fuente', 'fuente'),
+            
+            'my father' => array('我的父亲', '麦法瑟', '麦法泽', '麦法哲', '麦法德', '麦法蒂', '迈法瑟', '迈法泽', '迈法哲', '父亲', '我父亲', '吾父', '我爸爸', '加西亚', '加西亚我的父亲', '何塞加西亚', '唐佩平', '唐·佩平', '佩平加西亚', '佩平', 'my father', 'my father cigars'),
+            
+            'oliva' => array('奥利瓦', '奥利娃', '奥丽瓦', '奥丽娃', '欧利瓦', '欧利娃', '欧丽瓦', '欧丽娃', '奥利', '欧利', '奥利华', '欧利华', '奥力瓦', '欧力瓦', '奥利弗', '欧利弗', '奥里瓦', '欧里瓦', '奥立瓦', '欧立瓦', 'oliva'),
+            
+            'davidoff' => array('大卫杜夫', '大卫·杜夫', '大为杜夫', '大为·杜夫', '达维多夫', '达维·多夫', '达维·杜夫', '大卫多夫', '大卫·多夫', '杜夫', '大卫度夫', '大威杜夫', '戴维多夫', '戴维杜夫', '戴维·杜夫', '达维杜夫', '达维都夫', '達維多夫', '大維杜夫', '達維杜夫', 'davidoff'),
+            
+            'drew estate' => array('杜鲁庄园', '德鲁庄园', '杜鲁农庄', '德鲁农庄', '德鲁产业', '杜鲁产业', '德鲁地产', '杜鲁地产', '德鲁', '杜鲁', '杜鲁雪茄', '德鲁雪茄', '德鲁艾斯特', '杜鲁艾斯特', '德鲁庄园公司', '杜鲁庄园公司', '德鲁地产公司', '杜鲁地产公司', 'drew estate'),
+            
+            'alec bradley' => array('亚历克·布拉德利', '亚历克布拉德利', '阿列克·布拉德利', '阿列克布拉德利', '艾力克·布莱德利', '艾力克布莱德利', '亚力克·布莱德利', '亚力克布莱德利', '布拉德利', '亚历克', '亚历克·布莱德利', '阿力克布拉德利', '艾利克布拉德利', '亚列克布拉德利', '亚力布拉德利', '艾立克布莱德利', '阿立克布拉德利', 'alec bradley', 'ab'),
+            
+            'rocky patel' => array('洛基·帕特尔', '洛基帕特尔', '罗基·帕特尔', '罗基帕特尔', '洛基·帕特', '洛基帕特', '罗基·帕特', '罗基帕特', '帕特尔', '洛基', '洛奇帕特尔', '罗奇帕特尔', '洛基巴特尔', '罗基巴特尔', '洛基派特尔', '罗基派特尔', '洛基帕泰尔', '罗基帕泰尔', '岩石帕特尔', '石头帕特尔', 'rocky patel', 'rp'),
+            
+            'perdomo' => array('佩多莫', '帕多莫', '佩尔多莫', '帕尔多莫', '佩多摩', '帕多摩', '佩尔多摩', '帕尔多摩', '多莫', '佩多', '珀多莫', '珀尔多莫', '佩都莫', '帕都莫', '佩朵莫', '帕朵莫', '佩多谟', '帕多谟', '佩多墨', '帕多墨', 'perdomo'),
+            
+            'e.p. carrillo' => array('E.P.卡里洛', 'E.P.·卡里洛', 'E.P.卡利略', 'E.P.·卡利略', 'E.P.卡里约', 'E.P.·卡里约', 'E.P.卡里罗', 'E.P.·卡里罗', '卡里洛', '卡利略', '卡里约', '卡里罗', '卡利洛', '卡利约', '卡利罗', '卡理洛', '卡理略', '卡理约', '卡理罗', '厄内斯托·佩雷斯·卡里洛', '厄内斯托卡里洛', '佩雷斯卡里洛', '埃内斯托卡里洛', 'e.p. carrillo', 'ep carrillo', 'carrillo'),
+            
+            'la flor dominicana' => array('多米尼加之花', '多米尼加花', '多米尼加的花', '多明尼加之花', '多明尼加花', '多明尼加的花', '拉弗罗多米尼加纳', '拉弗洛多米尼加纳', '拉芙罗多米尼加纳', '拉芙洛多米尼加纳', '拉弗洛多米尼加', '拉芙洛多米尼加', '拉·弗洛尔·多米尼加纳', '拉弗洛尔多米尼加纳', '多米尼加的花朵', '多明尼加的花朵', '多米尼加之花雪茄', 'la flor dominicana', 'lfd'),
+            
+            'ashton' => array('阿什顿', '艾什顿', '亚什顿', '艾许顿', '亚许顿', '阿什敦', '艾什敦', '亚什敦', '艾许敦', '亚许敦', '爱诗顿', '爱士顿', '阿诗顿', '艾诗顿', '阿士顿', '艾士顿', '亚诗顿', '亚士顿', '阿什敦', '艾什敦', 'ashton'),
+            
+            'macanudo' => array('马卡努多', '麦卡努多', '马卡努铎', '麦卡努铎', '马克努多', '麦克努多', '马克努铎', '麦克努铎', '卡努多', '马卡', '麦卡', '麦卡鲁多', '马卡鲁多', '麦克鲁多', '马克鲁多', '玛卡努多', '玛克努多', '麦卡纽多', '马卡纽多', 'macanudo'),
+           
+           'camacho' => array('卡马乔', '卡玛乔', '卡马丘', '卡玛丘', '卡马肖', '卡玛肖', '喀马乔', '喀玛乔', '喀马丘', '喀玛丘', '卡玛丘', '卡马秋', '卡玛秋', '卡马茶', '卡玛茶', '卡马周', '卡玛周', '卡吗乔', '咖玛乔', '咖马乔', 'camacho'),
+           
+           'cao' => array('CAO', '希爱欧', '希爱傲', '希艾欧', '希艾傲', '西爱欧', '西爱傲', '西艾欧', '西艾傲', '希爱欧雪茄', '卡奥', '高', '曹', '草', '考', '靠', '希欧', '希傲', '西欧', '西傲', 'cao'),
+           
+           'joya de nicaragua' => array('尼加拉瓜的宝石', '尼加拉瓜宝石', '尼加拉瓜珠宝', '尼加拉瓜之宝', '何亚尼加拉瓜', '乔亚尼加拉瓜', '霍亚尼加拉瓜', '豪亚尼加拉瓜', '尼加拉瓜', '何亚', '乔亚', '霍亚', '豪亚', '荷亚尼加拉瓜', '胡亚尼加拉瓜', '侯亚尼加拉瓜', '和亚尼加拉瓜', '尼加拉瓜乔亚', '尼加拉瓜霍亚', 'joya de nicaragua', 'jdn'),
+           
+           'aj fernandez' => array('AJ·费尔南德斯', 'AJ费尔南德斯', 'AJ·费南德斯', 'AJ费南德斯', 'AJ·费尔南多斯', 'AJ费尔南多斯', 'AJ·费南多斯', 'AJ费南多斯', '费尔南德斯', 'AJ', 'AJ·费尔南迪斯', 'AJ费尔南迪斯', 'AJ·费南迪斯', 'AJ费南迪斯', '艾杰费尔南德斯', '艾杰费南德斯', '埃杰费尔南德斯', '埃杰费南德斯', '阿杰费尔南德斯', '阿杰费南德斯', 'aj fernandez', 'ajf'),
+           
+           'la aurora' => array('拉奥罗拉', '拉欧若拉', '拉奥若拉', '拉欧罗拉', '拉·奥罗拉', '拉·欧若拉', '拉·奥若拉', '拉·欧罗拉', '奥罗拉', '欧若拉', '拉奥洛拉', '拉欧洛拉', '拉阿罗拉', '拉啊罗拉', '拉澳罗拉', '拉澳若拉', '曙光', '极光', '黎明', '拉黎明', 'la aurora', 'aurora'),
+           
+           'plasencia' => array('普拉森西亚', '普拉森西娅', '普拉森希亚', '普拉森希娅', '普拉申西亚', '普拉申西娅', '普拉申希亚', '普拉申希娅', '普拉森', '普拉申', '普拉森夏', '普拉申夏', '普拉森霞', '普拉申霞', '普拉圣西亚', '普拉圣夏', '普拉森斯亚', '普拉申斯亚', '普拉先西亚', '普拉先夏', 'plasencia'),
+           
+           // Additional non-Cuban brands
+           'tatuaje' => array('塔图阿赫', '塔图哈耶', '纹身', '塔图亚耶', '塔图阿杰', '塔图哈杰', '达图阿赫', '达图哈耶', '塔图艾', '塔图耶', '塔图杰', '塔图埃', '塔图阿埃', '塔图哈埃', '刺青', '文身', 'tatuaje'),
+           
+           'liga privada' => array('私人联盟', '私人同盟', '利加私人', '利加', '私藏联盟', '私藏同盟', '秘密联盟', '秘密同盟', '里加私人', '里加', '利嘉私人', '利嘉', '私人利加', '私人里加', '私人利嘉', 'liga privada', 'liga'),
+           
+           'undercrown' => array('地下皇冠', '恩都罗', '下冠', '暗冠', '皇冠下', '地下冠', '安德皇冠', '安德冠', '恩德皇冠', '恩德冠', '底冠', '低冠', '次皇冠', '次冠', 'undercrown', 'uc'),
+           
+           'kristoff' => array('克里斯托夫', '克里斯托弗', '克里斯多夫', '克里斯多弗', '克里斯朵夫', '克里斯朵弗', '基里斯托夫', '基里斯托弗', '克里斯托福', '克里斯多福', '克里斯朵福', '基里斯托福', '克里斯托', '克里斯多', 'kristoff'),
+           
+           'crowned heads' => array('加冕之首', '皇冠之首', '冠首', '皇冠之头', '加冕之头', '冠头', '王冠之首', '王冠之头', '皇冠头', '加冕头', '王冠头', '冠军之首', '冠军之头', '冠军头', 'crowned heads', 'ch'),
+           
+           'viaje' => array('维亚赫', '维阿赫', '维亚杰', '维阿杰', '旅行', '旅程', '航程', '征程', '威亚赫', '威阿赫', '威亚杰', '威阿杰', '维亚热', '维阿热', '威亚热', '威阿热', 'viaje'),
+           
+           'l\'atelier' => array('工作室', '工坊', '拉特利尔', '拉特利埃', '拉特利耶', '拉特丽尔', '拉特丽埃', '拉特丽耶', '拉泰利尔', '拉泰利埃', '拉泰利耶', '拉泰丽尔', '拉泰丽埃', '拉泰丽耶', '工匠', '匠人', 'l\'atelier', 'latelier', 'l atelier'),
+           
+           'southern draw' => array('南方绘画', '南方抽签', '南部绘画', '南部抽签', '南方画', '南部画', '南方德劳', '南部德劳', '索瑟恩德劳', '索瑟恩德洛', '南方德洛', '南部德洛', '南方拉', '南部拉', 'southern draw', 'sd'),
+           
+           'herrera esteli' => array('埃雷拉埃斯特利', '埃雷拉埃斯特里', '赫雷拉埃斯特利', '赫雷拉埃斯特里', '艾雷拉埃斯特利', '艾雷拉埃斯特里', '埃雷拉', '赫雷拉', '艾雷拉', '埃斯特利', '埃斯特里', '埃雷拉艾斯特利', '赫雷拉艾斯特利', '艾雷拉艾斯特利', 'herrera esteli', 'he'),
+           
+           'foundation' => array('基础', '基金会', '基金', '创基', '创立', '奠基', '根基', '基石', '佛恩达深', '方德深', '方德森', '丰德深', '丰德森', '富恩达深', '富恩达森', 'foundation', 'foundation cigars'),
+           
+           'warped' => array('翘曲', '弯曲', '华普德', '瓦普德', '沃普德', '华普特', '瓦普特', '沃普特', '华普', '瓦普', '沃普', '变形', '扭曲', '歪曲', '华博德', '瓦博德', '沃博德', 'warped', 'warped cigars'),
+           
+           'dunbarton tobacco & trust' => array('邓巴顿烟草信托', '邓巴顿', '邓巴敦烟草信托', '邓巴敦', '登巴顿烟草信托', '登巴顿', '登巴敦烟草信托', '登巴敦', '敦巴顿烟草信托', '敦巴顿', '敦巴敦烟草信托', '敦巴敦', '邓巴顿烟草', '邓巴敦烟草', '登巴顿烟草', '登巴敦烟草', 'dunbarton tobacco & trust', 'dunbarton', 'dt&t'),
+           
+           'illusione' => array('幻影', '幻象', '幻觉', '错觉', '伊鲁西奥内', '伊鲁西奥尼', '伊露西奥内', '伊露西奥尼', '伊路西奥内', '伊路西奥尼', '伊卢西奥内', '伊卢西奥尼', '伊陆西奥内', '伊陆西奥尼', '幻境', '错觉', 'illusione'),
+           
+           'roma craft' => array('罗马工艺', '罗马工坊', '罗马手工', '罗马技艺', '罗马克拉夫特', '罗马克拉夫', '罗马克莱夫特', '罗马克莱夫', '罗玛工艺', '罗玛工坊', '罗玛手工', '罗玛技艺', '罗玛克拉夫特', '罗玛克拉夫', 'roma craft', 'romacraft'),
+           
+           'leaf by oscar' => array('奥斯卡之叶', '奥斯卡叶子', '奥斯卡烟叶', '叶子奥斯卡', '烟叶奥斯卡', '奥斯卡的叶', '奥斯卡的烟叶', '奥斯卡的叶子', '奥斯卡之页', '奥斯卡页', '欧斯卡之叶', '欧斯卡叶子', '欧斯卡烟叶', 'leaf by oscar', 'leaf'),
+           
+           'espinosa' => array('埃斯皮诺萨', '埃斯皮诺莎', '艾斯皮诺萨', '艾斯皮诺莎', '埃斯宾诺萨', '埃斯宾诺莎', '艾斯宾诺萨', '艾斯宾诺莎', '埃斯比诺萨', '埃斯比诺莎', '艾斯比诺萨', '艾斯比诺莎', '埃斯匹诺萨', '埃斯匹诺莎', '艾斯匹诺萨', '艾斯匹诺莎', 'espinosa', 'espinosa cigars'),
+           
+           'room101' => array('101房间', '房间101', '101室', '室101', '101号房', '房号101', '101号室', '室号101', '一零一房间', '房间一零一', '一零一室', '室一零一', '壹零壹房间', '房间壹零壹', '壹零壹室', '室壹零壹', 'room101', 'room 101'),
+           
+           'avo' => array('阿沃', '爱沃', '艾沃', '阿伏', '爱伏', '艾伏', '阿佛', '爱佛', '艾佛', '阿窝', '爱窝', '艾窝', '阿握', '爱握', '艾握', '阿夫', '爱夫', '艾夫', 'avo', 'avo cigars'),
+           
+           'mbombay' => array('孟买', '蒙贝', '蒙拜', '孟贝', '孟拜', '蒙买', '姆贝', '姆拜', '姆孟买', '姆蒙贝', '姆蒙拜', '姆孟贝', '姆孟拜', '姆蒙买', '母贝', '母拜', 'mbombay', 'm bombay'),
+           
+           // Additional premium brands
+           'hammer + sickle' => array('锤子镰刀', '锤与镰', '铁锤镰刀', '铁锤与镰刀', '锤镰', '锤和镰刀', '锤加镰刀', '锤子加镰刀', '铁锤加镰刀', '哈默与镰刀', '哈默加镰刀', '汉默与镰刀', '汉默加镰刀', 'hammer + sickle', 'hammer and sickle', 'hammer & sickle'),
+           
+           'quesada' => array('克萨达', '奎萨达', '凯萨达', '盖萨达', '格萨达', '克塞达', '奎塞达', '凯塞达', '盖塞达', '格塞达', '克赛达', '奎赛达', '凯赛达', '盖赛达', '格赛达', '奎沙达', '凯沙达', '克沙达', 'quesada'),
+           
+           'asylum' => array('疯人院', '精神病院', '避难所', '庇护所', '收容所', '阿塞勒姆', '阿赛勒姆', '阿塞伦', '阿赛伦', '阿西勒姆', '阿西伦', '艾塞勒姆', '艾赛勒姆', '艾塞伦', '艾赛伦', 'asylum', 'asylum cigars'),
+           
+           'fratello' => array('兄弟', '弗拉特洛', '富拉特洛', '夫拉特洛', '弗拉泰洛', '富拉泰洛', '夫拉泰洛', '弗拉特罗', '富拉特罗', '夫拉特罗', '弗拉泰罗', '富拉泰罗', '夫拉泰罗', '兄弟雪茄', '法拉特洛', 'fratello', 'fratello cigars')
+       );
+   }
+   
+   /**
+    * Enhanced size terms (vitolas) mapping
+    * Expanded with more international variations and patterns, including small sizes
+    */
+   public static function get_size_mappings() {
+       return array(
+           // English terms - common vitolas with expanded Chinese equivalents
+           'robusto' => array('罗布图', '罗伯图', '罗拔图', '罗布斯托', '罗布托', '罗布', '劳伯图', '罗布图斯', '罗伯图斯', '罗普图'),
+           'toro' => array('托罗', '公牛', '多罗', '托洛', '多洛', '托鲁', '多鲁', '特罗', '特洛', '特鲁'),
+           'torpedo' => array('鱼雷', '托皮多', '鱼型', '雷', '托比多', '托皮铎', '托比铎', '鱼形', '鱼雷型', '雷形'),
+           'churchill' => array('丘吉尔', '丘', '邱吉尔', '丘切尔', '丘丘', '邱丘', '丘丘尔', '丘尔切', '丘奇尔', '邱切尔'),
+           'corona' => array('皇冠', '科罗那', '皇', '冠', '科罗娜', '克罗那', '可罗那', '科罗', '克罗娜', '可罗娜'),
+           'petit corona' => array('小皇冠', '小科罗那', '小皇', '小冠', '迷你皇冠', '小克罗那', '迷你科罗那', '小科罗娜', '迷你科罗娜', '小型皇冠'),
+           'lancero' => array('长矛', '兰塞罗', '长', '矛', '兰赛罗', '长矛型', '细长', '长形', '兰彻罗', '兰切罗'),
+           'belicoso' => array('比利高', '彪丽高', '比利高斯', '鱼雷', '比利', '贝利高', '比利克', '比丽高', '比利科', '比利克斯'),
+           'pyramid' => array('金字塔', '金塔', '塔型', '比拉米德', '比拉米', '比拉米特', '金塔型', '塔', '金字型', '比拉密德'),
+           'piramides' => array('金字塔', '皮拉米德', '塔', '金塔', '皮拉密', '皮拉密德', '皮拉米', '皮拉米德斯', '金字塔型', '金塔形'),
+           'gran toro' => array('大托罗', '大公牛', '巨型托罗', '格兰托罗', '大型托罗', '格兰托鲁', '巨托罗', '大托鲁', '特大托罗', '特大公牛'),
+           'perfecto' => array('完美', '珀费托', '双头', '双头锥', '双头雪茄', '双头型', '完美型', '双锥', '珀费克托', '完善'),
+           'double corona' => array('双皇冠', '双科罗那', '双皇', '双冠', '双克罗那', '双科罗娜', '双克罗娜', '双重皇冠', '双重科罗那', '双重科罗娜'),
+           'culebra' => array('盘蛇', '麻花雪茄', '库莱伯拉', '三头雪茄', '曲线', '蛇型', '盘绕', '库列布拉', '麻花', '蛇形'),
+           'panetela' => array('帕内特拉', '长宾丽', '宾丽', '细长型', '帕尼特拉', '帕尼丽', '帕内特', '帕尼特', '宾利', '长宾利'),
+           'gran panetela' => array('巨型宾丽', '大帕内特拉', '大宾丽', '格兰帕尼特拉', '巨宾丽', '大帕尼特拉', '大宾利', '格兰帕内特拉', '大型帕内特拉', '大型宾丽'),
+           'lonsdale' => array('朗斯代尔', '长秀丽', '隆斯代尔', '朗', '朗思代尔', '朗斯台尔', '隆斯台尔', '朗斯达尔', '隆斯达尔', '朗斯戴尔'),
+           'rothschild' => array('罗斯柴尔德', '洛芝', '罗斯切尔德', '罗斯', '罗子', '罗斯查尔德', '罗斯彻尔德', '洛芝尔德', '罗斯柴', '罗斯切'),
+           'petit' => array('小型', '小号', '小', '迷你', '贝蒂', '佩蒂', '迷你型', '微型', '佩提', '贝提'),
+           'short' => array('短', '矮', '短号', '短款', '肖特', '短型', '短小', '矮型', '矮小', '短体'),
+           'gordo' => array('胖皇冠', '胖皇', '戈尔多', '胖', '戈多', '胖型', '肥', '宽', '厚', '胖款'),
+           'presidente' => array('总统', '普雷西登特', '总裁', '主席', '总', '普雷', '总统型', '总裁型', '主席型', '普雷西'),
+           'corona gorda' => array('皇冠戈达', '胖皇冠', '科罗娜戈达', '胖科罗那', '科达', '胖冠', '皇冠胖', '科罗那胖', '戈达冠', '戈达科罗那'),
+           'hermoso' => array('美丽', '埃尔莫索', '赫莫索', '秀丽', '漂亮', '艾尔莫索', '赫尔莫索', '赫莫', '艾莫索', '赫莫'),
+           'demi tasse' => array('小杯', '半杯', '德米塔斯', '小咖啡', '迷你杯', '德米', '半咖啡', '小塔斯', '德米塔', '塔斯'),
+           'julieta' => array('朱丽叶', '胡丽塔', '朱丽', '胡莉亚', '如利特', '朱利叶', '尤利特', '尤莉特', '裘利塔', '朱利'),
+           'gran corona' => array('大皇冠', '格兰科罗那', '大科罗那', '大克罗那', '大冠', '大皇', '格兰冠', '特大皇冠', '特大科罗那', '特大冠'),
+           'magnum' => array('大皇冠', '麦格纳姆', '麦格纽姆', '马格南', '麦格龙', '马格农', '麦格南', '大口径', '马格侬', '麦格尼姆'),
+           'cazadores' => array('猎人', '卡萨多雷斯', '卡扎多雷斯', '猎手', '猎者', '卡萨', '卡扎', '猎人型', '卡萨多', '卡扎多'),
+           'exquisitos' => array('精品', '吉士图', '吉时途', '埃克斯奎西托斯', '精致', '极品', '吉士', '精美', '埃克斯奎', '埃斯奎'),
+           'secretos' => array('秘密', '奥秘', '塞克雷托斯', '秘', '隐秘', '塞克雷', '塞克', '秘藏', '隐', '奥'),
+           'genios' => array('天才', '杰尼奥斯', '吉尼奥斯', '天资', '精灵', '天赋', '天分', '杰尼', '吉尼', '天才型'),
+           'nobles' => array('贵族', '诺布雷斯', '贵', '高尚', '尊贵', '诺布', '诺布尔', '贵人', '贵胄', '贵族型'),
+           'dianas' => array('戴安娜', '黛安娜', '戴', '黛', '狄安娜', '戴安', '黛安', '狄安', '戴安那', '黛安那'),
+           'siglo' => array('世纪', '西格鲁', '西格洛', '世纪', 'sig', '西格', '西格罗', '世', '西', '纪'),
+           'behike' => array('贝希克', '贝依可', '比海客', 'BHK', '贝黑克', '贝海克', '比依克', '贝克', '贝依克', '比黑克'),
+           'edmundo' => array('艾德蒙多', '爱德蒙多', '埃德蒙多', '艾蒙多', '爱蒙多', '埃蒙多', '艾德蒙', '爱德蒙', '埃德蒙', '艾德'),
+           'petit edmundo' => array('小艾德蒙多', '小爱德蒙多', '迷你艾德蒙多', '小埃德蒙多', '迷你爱德蒙多', '迷你埃德蒙多', '小艾蒙多', '小爱蒙多', '小埃蒙多', '小型艾德蒙多'),
+           'double' => array('双', '双倍', '双重', '两倍', '两个', '双份', '两份', '成双', '加倍', '双份'),
+           'miniatures' => array('迷你', '小型', '微型', '小小', '最小', '迷你型', '微型版', '小型版', '小巧', '小款'),
+           'perla' => array('珍珠', '帕拉', '佩尔拉', '宝珠', '明珠', '珠', '小珠', '帕尔', '佩尔', '珍'),
+           'dalia' => array('大丽花', '达利亚', '达丽亚', '大莉亚', '达利花', '达丽花', '达花', '达莉亚', '大利亚', '大利花'),
+           'mareva' => array('马里瓦', '玛莱瓦', '马雷瓦', '玛丽瓦', '马丽瓦', '玛雷瓦', '马雷娃', '玛莱娃', '马里娃', '玛丽娃'),
+           'gran edmundo' => array('大埃德蒙多', '大艾德蒙多', '格兰艾德蒙多', '大爱德蒙多', '格兰埃德蒙多', '格兰爱德蒙多', '大型艾德蒙多', '大型埃德蒙多', '大型爱德蒙多', '特大艾德蒙多'),
+           'duke' => array('公爵', '杜克', '爵士', '公', '爵', '杜', '杜克爵士', '杜克公爵', '公爵型', '爵士型'),
+           'prominente' => array('突出', '杰出', '普罗米内特', '卓越', '显著', '突显', '卓著', '特出', '出众', '杰超'),
+           'petit pyramid' => array('小金字塔', '迷你金字塔', '小塔', '迷你塔', '小金塔', '迷你金塔', '小型金字塔', '迷你型金字塔', '小型塔', '迷你型塔'),
+           'half corona' => array('半皇冠', '半科罗那', '半冠', '半皇', '半科', '半克罗那', '半科罗娜', '半克罗娜', '半型皇冠', '半型科罗那'),
+           'petit belicoso' => array('小比利高', '小彪丽高', '迷你鱼雷', '小鱼雷', '迷你比利高', '迷你彪丽高', '小比利', '小贝利高', '迷你比利', '迷你贝利高'),
+          'gran belicoso' => array('大比利高', '大彪丽高', '大鱼雷', '大型比利高', '大型彪丽高', '大型鱼雷', '格兰比利高', '格兰彪丽高', '格兰鱼雷', '特大比利高'),
+            'club' => array('俱乐部', '会所', '团体', '小会', '俱乐', '会所型', '俱乐部型', '会', '会员', '团'),
+            'minuto' => array('分钟', '米努托', '迷你托', '分', '米努', '微托', '迷你', '迷', '分钟型', '米型'),
+            'media corona' => array('中皇冠', '中科罗那', '中冠', '中皇', '中科', '中克罗那', '中科罗娜', '中克罗娜', '中型皇冠', '中型科罗那'),
+            'super corona' => array('超级皇冠', '超级科罗那', '超级冠', '超皇冠', '超科罗那', '超冠', '超皇', '超科', '超克罗那', '超科罗娜'),
+            'wide churchill' => array('宽丘吉尔', '宽丘', '胖丘吉尔', '宽邱吉尔', '胖邱吉尔', '宽丘切尔', '胖丘切尔', '宽型丘吉尔', '胖型丘吉尔', '宽大丘吉尔'),
+            'petit churchill' => array('小丘吉尔', '小丘', '迷你丘吉尔', '小邱吉尔', '迷你邱吉尔', '小丘切尔', '迷你丘切尔', '小型丘吉尔', '迷你型丘吉尔', '小巧丘吉尔'),
+            'robustos extra' => array('特级罗布图', '额外罗布托', '特罗布图', '特级罗布托', '额外罗布图', '特罗布托', '特级罗伯图', '额外罗伯图', '特罗伯图', '特级罗拔图'),
+            'short robusto' => array('短罗布图', '短罗布托', '短罗布', '短型罗布图', '短型罗布托', '短型罗布', '矮罗布图', '矮罗布托', '矮罗布', '短式罗布图'),
+            'robusto supremo' => array('至尊罗布图', '至上罗布图', '罗布图至尊', '至尊罗布托', '至上罗布托', '罗布托至尊', '至尊罗伯图', '至上罗伯图', '罗伯图至尊', '至尊罗拔图'),
+            'double toro' => array('双托罗', '双公牛', '双托', '双重托罗', '双重公牛', '双重托', '双份托罗', '双份公牛', '双份托', '双式托罗'),
+            'churchill tubos' => array('丘吉尔管装', '丘吉尔铝管', '管装丘吉尔', '丘管装', '丘铝管', '管装丘', '邱吉尔管装', '邱吉尔铝管', '管装邱吉尔', '丘切尔管装'),
+            'gordito' => array('小胖子', '小戈多', '戈迪托', '小胖', '小厚', '小宽', '小肥', '小戈多型', '戈迪型', '小胖型'),
+            'corona extra' => array('特级皇冠', '皇冠特级', '额外皇冠', '特制皇冠', '皇冠特制', '额外科罗那', '特级科罗那', '科罗那特级', '额外冠', '特级冠'),
+            'grand corona' => array('超大皇冠', '特大冠', '巨皇冠', '超级皇冠', '特大皇冠', '巨大皇冠', '超大科罗那', '特大科罗那', '巨科罗那', '超级科罗那'),
+            'double perfecto' => array('双完美', '双珀费托', '双双头', '双重完美', '双重珀费托', '双重双头', '双份完美', '双份珀费托', '双份双头', '双式完美'),
+            'short torpedo' => array('短鱼雷', '短雷', '短托比多', '短型鱼雷', '短型雷', '短型托比多', '矮鱼雷', '矮雷', '矮托比多', '短式鱼雷'),
+            'long corona' => array('长皇冠', '长科罗那', '长冠', '长型皇冠', '长型科罗那', '长型冠', '细长皇冠', '细长科罗那', '细长冠', '长式皇冠'),
+            'torpedo tubos' => array('鱼雷管装', '托皮多管', '鱼雷铝管', '管装鱼雷', '托皮多铝管', '管装托皮多', '雷管装', '雷铝管', '管装雷', '托比多管装'),
+            'toro gordo' => array('胖公牛', '胖托罗', '戈多托罗', '胖型公牛', '胖型托罗', '戈多型托罗', '肥托罗', '肥公牛', '宽托罗', '宽公牛'),
+            'gran piramide' => array('大金字塔', '大塔', '大金塔', '大型金字塔', '大型塔', '大型金塔', '格兰金字塔', '格兰塔', '格兰金塔', '特大金字塔'),
+            'petit lancero' => array('小长矛', '小兰塞罗', '迷你长矛', '小型长矛', '小型兰塞罗', '迷你型长矛', '迷你兰塞罗', '短长矛', '短兰塞罗', '小矛'),
+            'gran toro tubos' => array('大托罗管装', '大公牛铝管', '托罗特级管', '大托罗铝管', '大公牛管装', '托罗特级铝管', '管装大托罗', '管装大公牛', '铝管大托罗', '铝管大公牛'),
+            'figurado' => array('异形', '非标准形', '菲古拉多', '变形', '造型', '非典型', '特殊形', '非常规', '不规则', '造型型'),
+            'petit perfecto' => array('小完美', '小双头', '迷你完美', '小型完美', '小型双头', '迷你型完美', '迷你双头', '小珀费托', '迷你珀费托', '小型珀费托'),
+            'robusto gordo' => array('胖罗布图', '厚罗布图', '戈多罗布图', '胖型罗布图', '厚型罗布图', '戈多型罗布图', '胖罗布托', '厚罗布托', '戈多罗布托', '肥罗布图'),
+            'fuma' => array('福玛', '短小型', '芙玛', '呋玛', '福', '芙', '呋', '福马', '芙马', '呋马'),
+            'gran churchill' => array('大丘吉尔', '特大丘', '丘吉尔特大', '大型丘吉尔', '特大型丘', '丘吉尔特大型', '格兰丘吉尔', '格兰丘', '丘吉尔格兰', '巨丘吉尔'),
+            'salomon' => array('所罗门', '萨洛蒙', '所罗门王', '所罗', '萨洛', '所罗王', '所王', '萨王', '所罗门型', '萨洛蒙型'),
+            'petit salomon' => array('小所罗门', '迷你所罗门', '小萨洛蒙', '小型所罗门', '迷你型所罗门', '小型萨洛蒙', '迷你萨洛蒙', '小所罗', '迷你所罗', '小萨洛'),
+            'diademas' => array('皇冠珠', '戴德玛', '钢盔', '皇冠', '戴德', '钢', '戴德玛斯', '皇冠珠型', '戴德玛型', '钢盔型'),
+            
+            // Additional small vitolas (ring gauge under 40)
+            'mille fleurs' => array('千花', '米勒弗勒', '米勒福勒', '千朵花', '米尔福罗雷', '米勒福洛尔', '米尔弗勒尔', '千花型', '米勒', '千朵'),
+            'demi tasse' => array('小杯', '半杯', '德米塔斯', '小咖啡', '迷你杯', '德米', '塔塞', '半塔斯', '小塔斯', '德米塔'),
+            'tres petit corona' => array('极小皇冠', '超小科罗那', '三小冠', '特小皇冠', '特小科罗那', '极小科罗那', '三小皇冠', '超小皇冠', '极小冠', '特小冠'),
+            'entreacto' => array('幕间', '幕中', '场间', '场中', '幕间曲', '场间曲', '曲间', '曲中', '中场', '间幕'),
+            'purito' => array('小纯', '普里托', '纯小', '纯粹型', '小而纯', '纯型', '小纯型', '迷你纯', '普型', '迷你普里托'),
+            'cigarillo' => array('小雪茄', '迷你雪茄', '小型雪茄', '小烟', '迷你烟', '小型烟', '小雪', '迷你雪', '小型雪', '微型雪茄'),
+            'pequeño' => array('佩奎尼奥', '佩克尼奥', '小型', '极小', '超小', '迷你', '微型', '小巧', '迷你型', '小款'),
+            'demitasse' => array('半杯', '小杯', '德米塔斯', '德米', '半咖啡', '小咖啡', '半塔', '小塔', '德米半', '塔斯'),
+            'palmas' => array('棕榈', '帕尔玛斯', '棕叶', '帕尔马', '棕榈型', '帕尔玛型', '棕榈形', '帕尔玛形', '棕叶型', '帕尔马型'),
+            'marevas' => array('马雷瓦斯', '马雷瓦', '玛莱瓦斯', '玛莱瓦', '玛蕾瓦', '马蕾瓦', '玛雷瓦', '玛雷瓦斯', '马丽瓦', '马丽瓦斯'),
+            'panatelas' => array('帕纳特拉斯', '帕内特拉斯', '长宾丽', '宾丽', '细长型', '帕尼特拉斯', '帕尼丽', '帕纳特', '帕内特', '帕尼特'),
+            'small club' => array('小俱乐部', '小会所', '小团体', '小小会', '小俱乐', '小会所型', '小俱乐部型', '小会', '小会员', '小团'),
+            
+            // Additional popular non-Cuban formats
+            'sixty' => array('六十', '60号', '六零', '陆零', '陆拾', '六拾', '60环', '六十号', '六十环', '60'),
+            'gordo extra' => array('特级胖', '额外胖', '特胖', '特级戈尔多', '额外戈尔多', '特戈尔多', '特级肥', '额外肥', '特肥', '特级宽'),
+            'presidente tubos' => array('总统管装', '总裁铝管', '主席特级管', '总统铝管', '总裁管装', '主席特级铝管', '管装总统', '管装总裁', '铝管总统', '铝管总裁'),
+            'box-pressed' => array('方压', '盒压', '压盒', '方形压制', '盒状压制', '压制盒状', '方型', '盒型', '压方', '方压式'),
+            'petit robusto' => array('小罗布图', '小罗布托', '迷你罗布图', '小型罗布图', '小型罗布托', '迷你型罗布图', '迷你罗布托', '小罗伯图', '迷你罗伯图', '小型罗伯图'),
+            'mega robusto' => array('巨型罗布图', '超大罗布托', '特大罗布图', '巨型罗布托', '超大罗布图', '特大罗布托', '巨罗布图', '超罗布托', '特罗布图', '巨罗布托'),
+            'churchill maduro' => array('丘吉尔马杜罗', '丘马杜罗', '邱吉尔马杜罗', '丘切尔马杜罗', '丘丘马杜罗', '邱丘马杜罗', '丘丘尔马杜罗', '丘尔切马杜罗', '丘奇尔马杜罗', '邱切尔马杜罗'),
+            'robusto maduro' => array('罗布图马杜罗', '罗伯图马杜罗', '罗拔图马杜罗', '罗布斯托马杜罗', '罗布托马杜罗', '罗布马杜罗', '劳伯图马杜罗', '罗布图斯马杜罗', '罗伯图斯马杜罗', '罗普图马杜罗'),
+            'toro maduro' => array('托罗马杜罗', '公牛马杜罗', '多罗马杜罗', '托洛马杜罗', '多洛马杜罗', '托鲁马杜罗', '多鲁马杜罗', '特罗马杜罗', '特洛马杜罗', '特鲁马杜罗'),
+            'torpedo maduro' => array('鱼雷马杜罗', '托皮多马杜罗', '鱼型马杜罗', '雷马杜罗', '托比多马杜罗', '托皮铎马杜罗', '托比铎马杜罗', '鱼形马杜罗', '鱼雷型马杜罗', '雷形马杜罗'),
+            'robusto claros' => array('罗布图光', '罗伯图光', '罗拔图光', '罗布斯托光', '罗布托光', '罗布光', '劳伯图光', '罗布图斯光', '罗伯图斯光', '罗普图光'),
+            'nub' => array('纳布', '短粗', '短宽', '纳伯', '小粗', '粗短', '宽短', 'nab', '纳', '小肥'),
+            'petit toro' => array('小托罗', '小公牛', '迷你托罗', '小型托罗', '小型公牛', '迷你型托罗', '迷你公牛', '小多罗', '迷你多罗', '小型多罗'),
+            'long toro' => array('长托罗', '长公牛', '长托', '长型托罗', '长型公牛', '长型托', '细长托罗', '细长公牛', '细长托', '长式托罗'),
+            'extra toro' => array('特级托罗', '额外托罗', '特托罗', '特级公牛', '额外公牛', '特公牛', '特级托', '额外托', '特托', '特级多罗'),
+            'gran corona tubos' => array('大皇冠管装', '格兰科罗那铝管', '大科罗那特级管', '大皇冠铝管', '格兰科罗那管装', '大科罗那特级铝管', '管装大皇冠', '管装格兰科罗那', '铝管大皇冠', '铝管格兰科罗那')
+        );
+    }
+    
+    /**
+     * Enhanced special edition terms and series mapping
+     */
+    public static function get_special_mappings() {
+        return array(
+            // Model patterns with specific regex for series identification
+            'model_patterns' => array(
+                // Siglo patterns for Cohiba
+                '世纪[一1](?:号)?|西格鲁[一1](?:号)?|Siglo\s*[iI]' => 'Siglo I',
+                '世纪[二2](?:号)?|西格鲁[二2](?:号)?|Siglo\s*[iI][iI]' => 'Siglo II',
+                '世纪[三3](?:号)?|西格鲁[三3](?:号)?|Siglo\s*[iI][iI][iI]' => 'Siglo III',
+                '世纪[四4](?:号)?|西格鲁[四4](?:号)?|Siglo\s*[iI][vV]' => 'Siglo IV',
+                '世纪[五5](?:号)?|西格鲁[五5](?:号)?|Siglo\s*[vV]' => 'Siglo V',
+                '世纪[六6](?:号)?|西格鲁[六6](?:号)?|Siglo\s*[vV][iI]' => 'Siglo VI',
+                '半世纪|Medio\s*Siglo' => 'Medio Siglo',
+                
+                // Churchill variants
+                '(?:长|短|小|宽)[\s]*丘吉尔' => '$1 Churchill',
+                '长[\s]*丘[^吉]' => 'Churchill',
+                '短[\s]*丘[^吉]' => 'Short Churchill',
+                '小[\s]*丘[^吉]' => 'Petit Churchill',
+                '宽[\s]*丘[^吉]' => 'Wide Churchill',
+                
+                // Edmundo variants
+                '小[\s]*艾德蒙多|小[\s]*爱德蒙多|小[\s]*埃德蒙多' => 'Petit Edmundo',
+                '大[\s]*艾德蒙多|大[\s]*爱德蒙多|大[\s]*埃德蒙多' => 'Gran Edmundo',
+                '双[\s]*艾德蒙多|双[\s]*爱德蒙多|双[\s]*埃德蒙多' => 'Double Edmundo',
+                
+                // Roman numerals and series designations
+                'No\.\s*([1-9])|#([1-9])|([1-9])号' => 'No. $1$2$3',
+                '#([1-9])号?' => 'No. $1',
+                
+                // Series letters
+                'Serie\s*([DPE])\s*No\.\s*([1-9])' => 'Serie $1 No.$2',
+                '([DPE])系列\s*([1-9])(?:号)?' => 'Serie $1 No.$2',
+                '([DPE])\s*([1-9])' => 'Serie $1 No.$2',
+                
+                // Brand-specific patterns - Cohiba Behike
+                'BHK\s*#?\s*(\d+)' => 'Behike $1',
+                '贝希克\s*(\d+)' => 'Behike $1',
+                '贝依可\s*(\d+)' => 'Behike $1',
+                '比海客\s*(\d+)' => 'Behike $1',
+                '贝黑克\s*(\d+)' => 'Behike $1',
+                '贝海克\s*(\d+)' => 'Behike $1',
+                '比依克\s*(\d+)' => 'Behike $1',
+                
+                // Common number designations
+                'VF\s*(\d+)' => 'VF$1',
+                'D\s*(?:No\.)?\s*(\d+)' => 'D$1',
+                '([1-9])\s*号' => 'No. $1',
+                
+                // Anniversary patterns
+                '(\d{1,3})[\s]*周年|(\d{1,3})[\s]*週年|(\d{1,3})[\s]*年(?:周年)?' => '$1$2$3th Anniversary',
+                '(\d{1,3})[\s]*Anniversary' => '$1th Anniversary',
+                
+                // Specific series identification
+                '小鱼雷' => 'Petit Belicosos',
+                '短鱼雷' => 'Short Piramides',
+                '大天才' => 'Genios',
+                '中天才' => 'Magicos',
+                '小天才' => 'Secretos',
+                '特级鱼雷' => 'Piramides Extra',
+                '黄金系列' => 'Linea Oro',
+                '金系列' => 'Linea Oro',
+                '1935[\s]*传奇' => '1935 Leyenda',
+                '1935[\s]*杜马' => '1935 Dumas',
+                '1935[\s]*马尔特斯' => '1935 Maltes',
+                
+                // Year and edition matching
+                '(19|20)(\d{2})[\s]*限量版?' => '$1$2 Limited Edition',
+                
+                // Chinese zodiac years
+                '虎年[\s]*限量版?' => 'Year Of The Tiger',
+                '龙年[\s]*限量版?' => 'Year Of The Dragon',
+                '兔年[\s]*限量版?' => 'Year Of The Rabbit',
+                '蛇年[\s]*限量版?' => 'Year Of The Snake',
+                '马年[\s]*限量版?' => 'Year Of The Horse',
+                '羊年[\s]*限量版?' => 'Year Of The Sheep',
+                '猴年[\s]*限量版?' => 'Year Of The Monkey',
+                '鸡年[\s]*限量版?' => 'Year Of The Rooster',
+                '狗年[\s]*限量版?' => 'Year Of The Dog',
+                '猪年[\s]*限量版?' => 'Year Of The Pig',
+                '鼠年[\s]*限量版?' => 'Year Of The Rat',
+                '牛年[\s]*限量版?' => 'Year Of The Ox',
+                
+                // Davidoff patterns with complete Chinese series names
+                '大卫杜夫[\s]*([白黑黄金银])(?:色|牌)' => 'Davidoff $1 Band',
+                '大卫杜夫[\s]*白牌' => 'Davidoff White Label',
+                '大卫杜夫[\s]*黑牌' => 'Davidoff Black Label',
+                '大卫杜夫[\s]*金牌' => 'Davidoff Gold Label',
+                '大卫杜夫[\s]*银牌' => 'Davidoff Silver Label',
+                '大卫杜夫[\s]*尼加拉瓜' => 'Davidoff Nicaragua',
+                '大卫杜夫[\s]*尼加拉瓜[\s]*10[\s]*周年' => 'Davidoff Nicaragua 10th Anniversary',
+                '大卫杜夫[\s]*亚玛撒' => 'Davidoff Yamasa',
+                '大卫杜夫[\s]*雅玛莎' => 'Davidoff Yamasa',
+                '大卫杜夫[\s]*亚玛撒系列' => 'Davidoff Yamasa Series',
+                '大卫杜夫[\s]*艾斯库里奥' => 'Davidoff Escurio',
+                '大卫杜夫[\s]*艾斯库里奥系列' => 'Davidoff Escurio Series',
+                '大卫杜夫[\s]*温斯顿丘吉尔' => 'Davidoff Winston Churchill',
+                '大卫杜夫[\s]*温斯顿·丘吉尔' => 'Davidoff Winston Churchill',
+                '大卫杜夫[\s]*丘吉尔' => 'Davidoff Churchill',
+                '大卫杜夫[\s]*温斯顿丘吉尔[\s]*经典系列' => 'Davidoff Winston Churchill Original',
+                '大卫杜夫[\s]*温斯顿·丘吉尔[\s]*经典系列' => 'Davidoff Winston Churchill Original',
+                '大卫杜夫[\s]*至暗时刻' => 'Davidoff The Late Hour',
+                '大卫杜夫[\s]*温斯顿丘吉尔[\s]*至暗时刻' => 'Davidoff Winston Churchill The Late Hour',
+                '大卫杜夫[\s]*温斯顿·丘吉尔[\s]*至暗时刻' => 'Davidoff Winston Churchill The Late Hour',
+                '大卫杜夫[\s]*皇室' => 'Davidoff Royal',
+                '大卫杜夫[\s]*皇家系列' => 'Davidoff Royal Series',
+                '大卫杜夫[\s]*702[\s]*系列' => 'Davidoff 702 Series',
+                '大卫杜夫[\s]*702[\s]*署名' => 'Davidoff 702 Signature',
+                '大卫杜夫[\s]*702[\s]*系列[\s]*署名[\s]*2000' => 'Davidoff 702 Series Signature 2000',
+                '大卫杜夫[\s]*702[\s]*系列[\s]*特制[\s]*硬汉' => 'Davidoff 702 Series Special R',
+                '大卫杜夫[\s]*702[\s]*系列[\s]*特制[\s]*鱼雷' => 'Davidoff 702 Series Special T',
+                '大卫杜夫[\s]*702[\s]*系列[\s]*双[\s]*硬汉' => 'Davidoff 702 Series Double R',
+                '大卫杜夫[\s]*702[\s]*系列[\s]*3[\s]*号' => 'Davidoff 702 Series No. 3',
+                '大卫杜夫[\s]*经典系列' => 'Davidoff Signature Series',
+                '大卫杜夫[\s]*白茄标系列' => 'Davidoff White Label Series',
+                '大卫杜夫[\s]*经典[\s]*2000' => 'Davidoff Signature 2000',
+                '大卫杜夫[\s]*格兰高' => 'Davidoff Grand Cru',
+                '大卫杜夫[\s]*格兰高系列' => 'Davidoff Grand Cru Series',
+                '大卫杜夫[\s]*千禧' => 'Davidoff Millennium',
+                '大卫杜夫[\s]*千禧系列' => 'Davidoff Millennium Series',
+                '大卫杜夫[\s]*黑茄标系列' => 'Davidoff Black Label Series',
+                '大卫杜夫[\s]*片刻享受' => 'Davidoff Primeros',
+                '大卫杜夫[\s]*普利曼罗系列' => 'Davidoff Primeros Series',
+                '大卫杜夫[\s]*小雪茄' => 'Davidoff Mini Cigarillos',
+                '大卫杜夫[\s]*迷你雪茄' => 'Davidoff Mini Cigarillos',
+                '大卫杜夫[\s]*马杜罗系列' => 'Davidoff Maduro Series',
+                '大卫杜夫[\s]*周年庆典' => 'Davidoff Anniversary Series',
+                '大卫杜夫[\s]*周年庆典系列' => 'Davidoff Anniversary Series',
+                '达维多夫[\s]*([白黑黄金银])(?:色|牌)' => 'Davidoff $1Band',
+                '达维多夫[\s]*白牌' => 'Davidoff White Label',
+                '达维多夫[\s]*黑牌' => 'Davidoff Black Label',
+                '达维多夫[\s]*金牌' => 'Davidoff Gold Label',
+                '达维多夫[\s]*银牌' => 'Davidoff Silver Label',
+                '达维多夫[\s]*尼加拉瓜' => 'Davidoff Nicaragua',
+                '达维多夫[\s]*亚玛撒' => 'Davidoff Yamasa',
+                '达维多夫[\s]*雅玛莎' => 'Davidoff Yamasa',
+                '达维多夫[\s]*温斯顿丘吉尔' => 'Davidoff Winston Churchill',
+                '达维多夫[\s]*温斯顿·丘吉尔' => 'Davidoff Winston Churchill',
+                '达维多夫[\s]*至暗时刻' => 'Davidoff The Late Hour',
+                '达维多夫[\s]*702[\s]*系列' => 'Davidoff 702 Series',
+                '达维多夫[\s]*经典系列' => 'Davidoff Signature Series',
+                '季诺[\s]*尼加拉瓜' => 'Zino Nicaragua',
+                '季诺[\s]*白金' => 'Zino Platinum',
+                
+                // Double band patterns
+                '双圈' => 'Double Band',
+                '双环' => 'Double Band',
+                
+                // Torpedo variations
+                '小鱼' => 'Petit Torpedo',
+                '大鱼' => 'Gran Torpedo',
+                
+                // Padron series
+                '帕德龙[\s]*(\d{1,4})[\s]*周年' => 'Padron $1 Anniversary',
+                '帕德龙[\s]*家族[\s]*珍藏' => 'Padron Family Reserve',
+                '帕德龙[\s]*(\d{2,4})[\s]*系列' => 'Padron $1 Series',
+                '帕德隆[\s]*(\d{1,4})[\s]*周年' => 'Padron $1 Anniversary',
+                '帕德隆[\s]*家族[\s]*珍藏' => 'Padron Family Reserve',
+                '帕德隆[\s]*(\d{2,4})[\s]*系列' => 'Padron $1 Series',
+                
+                // Oliva Series
+                '奥利瓦[\s]*V[\s]*系列' => 'Oliva Serie V',
+                '奥利瓦[\s]*G[\s]*系列' => 'Oliva Serie G',
+                '奥利瓦[\s]*O[\s]*系列' => 'Oliva Serie O',
+                '奥利瓦[\s]*大师杰作[\s]*系列' => 'Oliva Master Blends',
+                '奥利瓦[\s]*V[\s]*梅拉尼奥' => 'Oliva Serie V Melanio',
+                '奥利娃[\s]*V[\s]*系列' => 'Oliva Serie V',
+                '奥利娃[\s]*G[\s]*系列' => 'Oliva Serie G',
+                '奥利娃[\s]*O[\s]*系列' => 'Oliva Serie O',
+                '奥利娃[\s]*大师杰作[\s]*系列' => 'Oliva Master Blends',
+                '奥利娃[\s]*V[\s]*梅拉尼奥' => 'Oliva Serie V Melanio',
+                
+                // Arturo Fuente series
+                '阿图罗[\s]*富恩特[\s]*不敢说话的X' => 'Arturo Fuente Opus X',
+                '阿图罗[\s]*富恩特[\s]*海明威' => 'Arturo Fuente Hemingway',
+                '阿图罗[\s]*富恩特[\s]*唐卡洛斯' => 'Arturo Fuente Don Carlos',
+                '阿图罗[\s]*富恩特[\s]*安妮欧' => 'Arturo Fuente Anejo',
+                '阿图罗[\s]*富恩特[\s]*X[\s]*作品' => 'Arturo Fuente Opus X',
+                '富恩特[\s]*不敢说话的X' => 'Fuente Opus X',
+                '富恩特[\s]*海明威' => 'Fuente Hemingway',
+                '富恩特[\s]*唐卡洛斯' => 'Fuente Don Carlos',
+                '富恩特[\s]*安妮欧' => 'Fuente Anejo',
+                '富恩特[\s]*X[\s]*作品' => 'Fuente Opus X',
+                
+                // My Father series
+                '我的父亲[\s]*勒比柱' => 'My Father Le Bijou',
+                '我的父亲[\s]*法官' => 'My Father The Judge',
+                '我的父亲[\s]*弗洛里达' => 'My Father La Flor de las Antillas',
+                '我的父亲[\s]*拉奥帕拉' => 'My Father La Opulencia',
+                '麦法瑟[\s]*勒比柱' => 'My Father Le Bijou',
+                '麦法瑟[\s]*法官' => 'My Father The Judge',
+                '麦法瑟[\s]*弗洛里达' => 'My Father La Flor de las Antillas',
+                '麦法瑟[\s]*拉奥帕拉' => 'My Father La Opulencia',
+                
+                // Rocky Patel Series
+                '洛基帕特尔[\s]*十周年' => 'Rocky Patel Decade',
+                '洛基帕特尔[\s]*十五周年' => 'Rocky Patel 15th Anniversary',
+                '洛基帕特尔[\s]*二十周年' => 'Rocky Patel 20th Anniversary',
+                '洛基帕特尔[\s]*老年' => 'Rocky Patel Vintage',
+                '洛基帕特尔[\s]*老年[\s]*1990' => 'Rocky Patel Vintage 1990',
+                '洛基帕特尔[\s]*老年[\s]*1992' => 'Rocky Patel Vintage 1992',
+                '洛基帕特尔[\s]*老年[\s]*1999' => 'Rocky Patel Vintage 1999',
+                '洛基帕特尔[\s]*老年[\s]*2003' => 'Rocky Patel Vintage 2003',
+                '罗基帕特尔[\s]*十周年' => 'Rocky Patel Decade',
+                '罗基帕特尔[\s]*十五周年' => 'Rocky Patel 15th Anniversary',
+                '罗基帕特尔[\s]*二十周年' => 'Rocky Patel 20th Anniversary',
+                '罗基帕特尔[\s]*老年' => 'Rocky Patel Vintage',
+                
+                // Drew Estate Series
+                '德鲁庄园[\s]*利加[\s]*9' => 'Drew Estate Liga Privada No.9',
+                '德鲁庄园[\s]*利加[\s]*T52' => 'Drew Estate Liga Privada T52',
+                '德鲁庄园[\s]*酸[\s]*一' => 'Drew Estate Acid One',
+                '德鲁庄园[\s]*酸[\s]*蓝调' => 'Drew Estate Acid Blondie',
+                '德鲁庄园[\s]*恩都罗' => 'Drew Estate Undercrown',
+                '德鲁庄园[\s]*恩都罗[\s]*阴影' => 'Drew Estate Undercrown Shade',
+                '德鲁庄园[\s]*恩都罗[\s]*马杜罗' => 'Drew Estate Undercrown Maduro',
+                '杜鲁庄园[\s]*利加[\s]*9' => 'Drew Estate Liga Privada No.9',
+                '杜鲁庄园[\s]*利加[\s]*T52' => 'Drew Estate Liga Privada T52',
+                '杜鲁庄园[\s]*酸[\s]*一' => 'Drew Estate Acid One',
+                '杜鲁庄园[\s]*酸[\s]*蓝调' => 'Drew Estate Acid Blondie',
+                '杜鲁庄园[\s]*恩都罗' => 'Drew Estate Undercrown',
+                
+                // EP Carrillo Series
+                'E.P.[\s]*卡里洛[\s]*誓约' => 'E.P. Carrillo Pledge',
+                'E.P.[\s]*卡里洛[\s]*安可' => 'E.P. Carrillo Encore',
+                'E.P.[\s]*卡里洛[\s]*历史' => 'E.P. Carrillo La Historia',
+                'E.P.[\s]*卡里洛[\s]*英寸' => 'E.P. Carrillo Inch',
+                'E.P.[\s]*卡利略[\s]*誓约' => 'E.P. Carrillo Pledge',
+                'E.P.[\s]*卡利略[\s]*安可' => 'E.P. Carrillo Encore',
+                'E.P.[\s]*卡利略[\s]*历史' => 'E.P. Carrillo La Historia',
+                'E.P.[\s]*卡利略[\s]*英寸' => 'E.P. Carrillo Inch',
+                
+                // Cuban brand-specific series
+                '罗密欧[\s]*([1-5])号' => 'Romeo No.$1',
+                '罗密欧[\s]*([1-5])' => 'Romeo No.$1',
+                '蒙特[\s]*([1-5])号' => 'Montecristo No.$1',
+                '蒙特[\s]*([1-5])' => 'Montecristo No.$1',
+                '蒙特[\s]*A' => 'Montecristo A',
+                '蒙特[\s]*开放[\s]*鹰' => 'Montecristo Open Eagle',
+                '蒙特[\s]*开放[\s]*大师' => 'Montecristo Open Master',
+                '蒙特[\s]*开放[\s]*初级' => 'Montecristo Open Junior',
+                '蒙特[\s]*开放[\s]*赛艇' => 'Montecristo Open Regatta',
+                '特立尼达[\s]*机智' => 'Trinidad Ingenios',
+                '特立尼达[\s]*菲吉亚' => 'Trinidad Vigia',
+                '特立尼达[\s]*创始人' => 'Trinidad Fundadores',
+                '特立尼达[\s]*殖民地' => 'Trinidad Coloniales',
+                '特立尼达[\s]*雷耶斯' => 'Trinidad Reyes',
+                '特立尼达[\s]*托佩斯' => 'Trinidad Topes',
+                '特利尼达[\s]*机智' => 'Trinidad Ingenios',
+                '特利尼达[\s]*菲吉亚' => 'Trinidad Vigia',
+                '特利尼达[\s]*创始人' => 'Trinidad Fundadores',
+                '特利尼达[\s]*殖民地' => 'Trinidad Coloniales',
+                '特利尼达[\s]*雷耶斯' => 'Trinidad Reyes',
+                '特利尼达[\s]*托佩斯' => 'Trinidad Topes',
+                '波利瓦尔[\s]*皇家皇冠' => 'Bolivar Royal Coronas',
+                '波利瓦尔[\s]*比利高[\s]*细雪茄' => 'Bolivar Belicoso Fino',
+                '玻利瓦尔[\s]*皇家皇冠' => 'Bolivar Royal Coronas',
+                '玻利瓦尔[\s]*比利高[\s]*细雪茄' => 'Bolivar Belicoso Fino',
+                '帕塔加斯[\s]*D[\s]*4' => 'Partagas Serie D No.4',
+                '帕塔加斯[\s]*P[\s]*2' => 'Partagas Serie P No.2',
+                '帕塔加斯[\s]*E[\s]*2' => 'Partagas Serie E No.2',
+                '帕特加斯[\s]*D[\s]*4' => 'Partagas Serie D No.4',
+                '帕特加斯[\s]*P[\s]*2' => 'Partagas Serie P No.2',
+                '帕特加斯[\s]*E[\s]*2' => 'Partagas Serie E No.2',
+                '优普曼[\s]*皇家罗布图' => 'H. Upmann Royal Robusto',
+                '优普曼[\s]*大皇冠[\s]*46' => 'H. Upmann Magnum 46',
+                '优普曼[\s]*大皇冠[\s]*50' => 'H. Upmann Magnum 50',
+                '优普曼[\s]*大皇冠[\s]*54' => 'H. Upmann Magnum 54',
+                '优普曼[\s]*爵士' => 'H. Upmann Connoisseur',
+                '乌普曼[\s]*皇家罗布图' => 'H. Upmann Royal Robusto',
+                '乌普曼[\s]*大皇冠[\s]*46' => 'H. Upmann Magnum 46',
+                '乌普曼[\s]*大皇冠[\s]*50' => 'H. Upmann Magnum 50',
+                '乌普曼[\s]*大皇冠[\s]*54' => 'H. Upmann Magnum 54',
+                '乌普曼[\s]*爵士' => 'H. Upmann Connoisseur',
+                '好友[\s]*美食家[\s]*1号' => 'Hoyo de Monterrey Epicure No.1',
+                '好友[\s]*美食家[\s]*2号' => 'Hoyo de Monterrey Epicure No.2',
+                '好友[\s]*美食家[\s]*特别[\s]*2号' => 'Hoyo de Monterrey Epicure Especial',
+                '好友[\s]*双皇冠' => 'Hoyo de Monterrey Double Corona',
+                '好友[\s]*小罗布图' => 'Hoyo de Monterrey Petit Robusto',
+                '霍约[\s]*美食家[\s]*1号' => 'Hoyo de Monterrey Epicure No.1',
+                '霍约[\s]*美食家[\s]*2号' => 'Hoyo de Monterrey Epicure No.2',
+                '霍约[\s]*美食家[\s]*特别[\s]*2号' => 'Hoyo de Monterrey Epicure Especial',
+                '霍约[\s]*双皇冠' => 'Hoyo de Monterrey Double Corona',
+                '霍约[\s]*小罗布图' => 'Hoyo de Monterrey Petit Robusto'
+            ),
+            
+            // Enhanced dimension pattern matching - critical for accurate size matching
+            'dimension_patterns' => array(
+                // Match patterns for typical vitola dimensions
+                // Format: RingGauge/Length - refined for better precision
+                '(?:4[6-8]|49|50)/(?:17[5-9]|18[0-5])' => 'Churchill',
+                '(?:4[3-7])/(?:16[0-9]|17[0-4])' => 'Lonsdale',
+                '(?:4[8-9]|5[0-2])/(?:12[0-9]|13[0-9])' => 'Robusto',
+                '(?:4[8-9]|5[0-2])/(?:10[0-9]|11[0-9])' => 'Petit Robusto',
+                '(?:5[2-5])/(?:14[0-9]|15[0-9])' => 'Toro',
+                '(?:5[5-9])/(?:13[0-9]|14[0-9])' => 'Wide Churchill',
+                '(?:5[0-4])/(?:14[8-9]|15[0-3])' => 'Siglo VI',
+                '(?:4[5-7])/(?:14[0-4])' => 'Siglo IV',
+                '(?:4[0-2])/(?:15[3-7])' => 'Siglo III',
+                '(?:4[0-2])/(?:12[7-9]|13[0-1])' => 'Siglo II',
+                '(?:3[8-9]|4[0-1])/(?:10[0-4])' => 'Siglo I',
+                '(?:5[0-4])/(?:10[0-4])' => 'Medio Siglo',
+                
+                // Exact dimensions for specific shapes with precise measurements
+                '50/124' => 'Robusto',
+                '47/178' => 'Churchill',
+                '43/126' => 'Corona',
+                '42/129' => 'Corona',
+                '40/102' => 'Petit Corona',
+                '55/133' => 'Wide Churchill',
+                '52/140' => 'Toro',
+                '54/145' => 'Toro',
+                '54/160' => 'Piramides Extra',
+                '56/135' => 'Nobles',
+                '52/145' => 'Dianas',
+                '57/125' => 'Hidalgos',
+                '53/132' => 'Ambar',
+                '52/170' => 'Seleccion Especial',
+                '54/140' => 'Leal',
+                '55/145' => 'Monterreyes',
+                '54/120' => 'Templarios',
+                '52/165' => 'Sixty',
+                
+                // Famous Cohiba Behike dimensions
+                '52/119' => 'Behike 52',
+                '54/144' => 'Behike 54',
+                '56/166' => 'Behike 56',
+                
+                // Famous Cohiba Robusto dimensions
+                '50/124' => 'Cohiba Robusto',
+                
+                // Famous Cohiba Esplendidos dimensions
+                '47/178' => 'Esplendidos',
+                
+                // Famous Montecristo No. 2 dimensions
+                '52/156' => 'Montecristo No. 2',
+                
+                // Famous Partagas Serie D No. 4 dimensions
+                '50/124' => 'Partagas Serie D No. 4',
+                
+                // Famous H. Upmann Magnum 50 dimensions
+                '50/160' => 'Magnum 50',
+                
+                // Famous Hoyo de Monterrey Epicure No. 2 dimensions
+                '50/124' => 'Epicure No. 2',
+                
+                // Mini and short formats with precise ranges
+                '(?:2[6-8])/(?:8[0-3])' => 'Short',
+                '(?:19|20|21)/(?:82|83|84)' => 'Mini',
+                '(?:21|22|23)/(?:9[5-9])' => 'Club',
+                
+                // Common dimension patterns for specialist cigars
+                '(?:3[8-9]|40)/(?:15[0-4])' => 'Lancero',
+                '(?:3[4-6])/(?:12[5-9])' => 'Panetela',
+                '(?:5[2-4])/(?:14[0-2])' => 'Torpedo',
+                '(?:5[2-4])/(?:13[7-9])' => 'Belicoso',
+                '(?:5[2-6]|57|58)/(?:13[0-5])' => 'Gran Toro',
+                
+                // Expanded with additional dimensions
+                '(?:3[8-9])/(?:9[2-8])' => 'Petit Corona',
+                '(?:4[2-3])/(?:11[0-5])' => 'Coronitas',
+                '(?:4[2-4])/(?:12[0-9])' => 'Corona',
+                '(?:4[2-4])/(?:15[0-7])' => 'Corona Gorda',
+                '(?:4[5-6])/(?:10[8-9]|11[0-4])' => 'Petit Robusto',
+                '(?:4[6-8])/(?:12[0-9]|13[0-9])' => 'Robusto',
+                '(?:5[0-4])/(?:15[0-9])' => 'Toro',
+                '(?:5[4-6])/(?:14[0-7])' => 'Torpedo',
+                '(?:5[5-9])/(?:14[0-9]|15[0-9])' => 'Gordo',
+                '(?:5[6-8])/(?:15[0-6])' => 'Double Corona',
+                '(?:6[0-4])/(?:15[0-9]|16[0-9])' => 'Gran Robusto',
+                '(?:6[0-4])/(?:18[0-9]|19[0-9])' => 'Gran Corona',
+                '(?:4[6-9])/(?:18[0-9]|19[0-9])' => 'Double Corona',
+                '(?:3[8-9])/(?:17[0-9]|18[0-9])' => 'Lancero',
+                '(?:4[1-3])/(?:16[8-9]|17[0-5])' => 'Lonsdale',
+                '(?:4[0-2])/(?:11[0-1])' => 'Perla',
+                '(?:5[0-3])/(?:9[0-9]|10[0-5])' => 'Half Corona',
+                '(?:3[3-6])/(?:9[0-9]|10[0-9])' => 'Minuto',
+                '(?:3[3-5])/(?:8[0-5])' => 'Demi Tasse',
+                '(?:2[6-9])/(?:8[6-9]|9[0-4])' => 'Club',
+                
+                // Common dimensions for non-Cuban cigars
+                '(?:5[0-2])/(?:13[2-8])' => 'Standard Toro',
+                '(?:5[4-6])/(?:15[2-8])' => 'Gran Toro',
+                '(?:6[0-4])/(?:15[8-9]|16[0-4])' => 'Gigante',
+                '(?:4[8-9])/(?:10[0-5])' => 'Rothschild',
+                '(?:4[4-6])/(?:16[0-8])' => 'Corona Extra',
+                '(?:4[2-4])/(?:13[0-6])' => 'Corona Especial',
+                '(?:5[2-4])/(?:17[5-9]|18[0-5])' => 'Double Toro',
+                '(?:6[0-4])/(?:12[0-6])' => 'Gordo Especial',
+                '(?:4[2-4])/(?:18[0-9])' => 'Long Corona',
+                '(?:3[6-8])/(?:7[0-9]|8[0-5])' => 'Small Club',
+                '(?:5[8-9]|6[0-2])/(?:13[0-9]|14[0-5])' => 'Presidente',
+                '(?:4[0-2])/(?:7[0-9])' => 'Cigarillo',
+                '(?:3[0-2])/(?:4[0-9]|5[0-5])' => 'Mini Cigarillo',
+                '(?:5[0-2])/(?:13[8-9]|14[0-5])' => 'Figurado',
+                '(?:4[2-4])/(?:16[0-9])' => 'Gran Panetela',
+                
+                // Small ring gauge dimensions
+                '(?:3[0-3])/(?:11[5-9]|12[0-2])' => 'Mille Fleurs',
+                '(?:3[0-2])/(?:10[0-5])' => 'Demi Tasse',
+                '(?:3[4-6])/(?:13[2-6])' => 'Petit Corona',
+                '(?:4[0-2])/(?:12[6-9])' => 'Marevas',
+                '(?:4[0-2])/(?:10[2-6])' => 'Perla',
+                '(?:3[0-2])/(?:10[0-4])' => 'Small Club',
+                '(?:3[0-3])/(?:9[6-8])' => 'Puritos',
+                '(?:3[6-8])/(?:9[0-5])' => 'Entroacto',
+                '(?:3[5-6])/(?:12[6-9]|13[0-2])' => 'Tres Petit Corona',
+                '(?:2[6-9])/(?:8[0-5])' => 'Cigarillo',
+                '(?:2[0-5])/(?:7[0-5])' => 'Mini',
+                '(?:3[2-4])/(?:10[7-9]|11[0-2])' => 'Petit Julieta',
+                '(?:3[8-9])/(?:12[9-9]|13[0-2])' => 'Petit Cazadores',
+                '(?:3[8-9])/(?:11[0-2])' => 'Minutos',
+                '(?:2[8-9]|3[0])/(?:8[5-7])' => 'Club',
+                '(?:3[8-9])/(?:10[4-7])' => 'Seoane',
+                '(?:2[8-9])/(?:11[0-3])' => 'Panetela',
+                '(?:2[6-8])/(?:9[5-9])' => 'Chicos'
+            ),
+            
+            // Enhanced year and special edition pattern matching
+            'year_patterns' => array(
+                // Match Chinese zodiac years with detailed pattern recognition
+                '(虎|兔|龙|蛇|马|羊|猴|鸡|狗|猪|鼠|牛)年(?:限量版?)?(?:20\d{2})?|20\d{2}(?:限量版?)?(虎|兔|龙|蛇|马|羊|猴|鸡|狗|猪|鼠|牛)年' => 'Year of the $1 $2',
+                
+                // Match specific four-digit year limited editions with more precision
+                '20(\d{2})(?:年)?限量(?:版)?|限量(?:版)?20(\d{2})(?:年)?' => '$1$2 Limited Edition',
+                '(?:限量|LE)(?:[版])?\s*\(?20(\d{2})\)?' => '$1 Limited Edition',
+                '(LE|限量版?)\s*(\d{4})' => '$2 Limited Edition',
+                '(\d{4})\s*(LE|限量版?)' => '$1 Limited Edition',
+                
+                // Match anniversary editions with specific year options
+                '(\d{1,3})(?:周年|週年|th\s*Anniversary)(?:限量版?)?' => '$1th Anniversary',
+                '(\d{1,3})\s*Anniversary' => '$1th Anniversary',
+                '周年|週年|(?:周年|週年)纪念' => 'Anniversary',
+                
+                // Match editions with specific years
+                '20(\d{2})年(出厂|产)' => '20$1 (Vintage)',
+                '20(\d{2})年限量版?' => '20$1LE',
+                
+                // Match general limited edition patterns with improved precision
+                '限量版|限量|限制版|限制|Limited\s*Edition' => 'Limited Edition',
+                '特别版|特别|特制版|特制|Special\s*Edition' => 'Special Edition',
+                '珍藏版|珍藏|Reserva' => 'Reserva',
+                '纪念版|纪念|Commemorative' => 'Commemorative Edition',
+                
+                // Millennium
+                '千禧|千禧年' => 'Millennium',
+                '2000年限量版' => '2000 Millennium Edition',
+                
+                // Additional patterns for specific years
+                '2010年以前' => 'Pre-2010',
+                '2010年以后' => 'Post-2010',
+                '2010年' => '2010',
+                '2011年' => '2011',
+                '2012年' => '2012',
+                '2013年' => '2013',
+                '2014年' => '2014',
+                '2015年' => '2015',
+                '2016年' => '2016',
+                '2017年' => '2017',
+                '2018年' => '2018',
+                '2019年' => '2019',
+                '2020年' => '2020',
+                '2021年' => '2021',
+                '2022年' => '2022',
+                '2023年' => '2023',
+                '2024年' => '2024',
+                '2025年' => '2025',
+            ),
+            
+            // Regional edition patterns with flexible matching
+            'regional_patterns' => array(
+                // More flexible regional edition patterns that match partial and various forms
+                '(?:古巴|古)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Cuba',
+                '(?:西班牙|西|西班|班牙)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Spain',
+                '(?:葡萄牙|葡|葡国|萄牙)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Portugal','(?:意大利|意|意大|大利)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Italy',
+               '(?:港澳|港|澳|香港|澳门|港澳|香港澳门)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Hong Kong & Macau',
+               '(?:法国|法|法国区域|法兰西)(?:地限|区域|地区|限定|限量|限)' => 'Ex. France',
+               '(?:德国|德|德意志)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Germany',
+               '(?:瑞士|瑞)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Switzerland',
+               '(?:英国|英|大不列颠|联合王国|UK)(?:地限|区域|地区|限定|限量|限)' => 'Ex. United Kingdom',
+               '(?:加拿大|加)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Canada',
+               '(?:墨西哥|墨)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Mexico',
+               '(?:荷兰|荷|尼德兰)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Netherlands',
+               '(?:比利时|比)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Belgium',
+               '(?:卢森堡|卢)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Luxembourg',
+               '(?:安道尔|安)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Andorra',
+               '(?:奥地利|奥)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Austria',
+               '(?:希腊|希)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Greece',
+               '(?:以色列|以)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Israel',
+               '(?:黎巴嫩|黎)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Lebanon',
+               '(?:阿联酋|阿联|迪拜|阿布扎比)(?:地限|区域|地区|限定|限量|限)' => 'Ex. UAE',
+               '(?:日本|日|日本区域)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Japan',
+               '(?:中国|中)(?:地限|区域|地区|限定|限量|限)' => 'Ex. China',
+               '(?:台湾|台)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Taiwan',
+               '(?:澳大利亚|澳大|澳州)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Australia',
+               '(?:泰国|泰)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Thailand',
+               '(?:新加坡|新)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Singapore',
+               '(?:马来西亚|马来|大马)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Malaysia',
+               '(?:韩国|韩|南韩)(?:地限|区域|地区|限定|限量|限)' => 'Ex. South Korea',
+               '(?:印度尼西亚|印尼|印度)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Indonesia',
+               '(?:俄罗斯|俄|俄国)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Russia',
+               '(?:拉丁美洲|拉美|拉)(?:地限|区域|地区|限定|限量|限)' => 'Ex. LAAM',
+               '(?:亚太|亚太地区|亚洲太平洋)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Asia Pacific',
+               '(?:亚洲|亚)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Asia',
+               '(?:欧洲|欧|欧盟)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Europe',
+               '(?:北美洲|北美)(?:地限|区域|地区|限定|限量|限)' => 'Ex. North America',
+               '(?:中东|中东地区)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Middle East',
+               '(?:北欧|北欧地区|斯堪的纳维亚)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Nordic',
+               '(?:加勒比|加勒比地区)(?:地限|区域|地区|限定|限量|限)' => 'Ex. Caribbean',
+               '(?:全球限量|全球|国际|环球)(?:地限|区域|地区|限定|限量|限|\\d+盒)' => 'Limited Production',
+               '(?:独立编号|编号|独立号|独号)' => 'Numbered',
+               '区域限定版' => 'Regional Edition',
+               '地区限定版' => 'Regional Edition',
+               '(?:ER|RE)(?:\\s|\\()\\d{4}' => 'Regional Edition',
+               '\\d{4}(?:\\s)?(?:ER|RE)' => 'Regional Edition'
+           ),
+           
+           // Special edition terms mapping - enhanced with more variations
+           'special_editions' => array(
+               '限量版' => 'Limited Edition',
+               '限量' => 'Limited',
+               'LE' => 'Limited Edition',
+               '珍藏版' => 'Reserva',
+               '珍藏' => 'Reserva',
+               '周年纪念' => 'Anniversary',
+               '周年' => 'Anniversary',
+               '周年紀念' => 'Anniversary',
+               'Anniversary' => 'Anniversary',
+               '特别版' => 'Special Edition',
+               '特别' => 'Special',
+               '特選版' => 'Special Edition',
+               '特選' => 'Special',
+               '纪念版' => 'Commemorative Edition',
+               '纪念' => 'Commemorative',
+               '紀念版' => 'Commemorative Edition',
+               '紀念' => 'Commemorative',
+               '特選' => 'Selected',
+               '特別版' => 'Special Edition',
+               '特別' => 'Special',
+               '手工卷制' => 'Hand Rolled',
+               '全手工' => 'Totally Hand Made',
+               '手工' => 'Hand Made',
+               '精选' => 'Premium',
+               '精選' => 'Premium',
+               '老年份' => 'Aged',
+               '陈年' => 'Aged',
+               '典藏' => 'Collection',
+               '典藏版' => 'Collection Edition',
+               '区域版' => 'Regional Edition',
+               '区域' => 'Regional',
+               '地区限定' => 'Regional Edition',
+               'LCDH' => 'LCDH',
+               'EH-LCDH' => 'EH-LCDH',
+               'RE' => 'Regional Edition',
+               '木盒' => 'Wooden Box',
+               '保湿盒' => 'Humidor',
+               '全球限量' => 'Limited Production',
+               '编号' => 'Numbered',
+               '独立编号' => 'Numbered',
+               '古巴地限' => 'Ex. Cuba',
+               '旅行装' => 'Travel Set',
+               '千禧' => 'Millennium',
+               // Additional special editions
+               'Grand Reserva' => 'Grand Reserva',
+               '特级珍藏' => 'Grand Reserva',
+               'Seleccion Reserva' => 'Seleccion Reserva',
+               '特选珍藏' => 'Seleccion Reserva',
+               '收藏家' => 'Coleccion',
+               '私人收藏' => 'Private Collection',
+               '私藏' => 'Private Reserve',
+               'Anejados' => 'Anejados',
+               '陈年系列' => 'Anejados',
+               'Book' => 'Book Edition',
+               '书本' => 'Book Edition',
+               'Vintage' => 'Vintage',
+               '年份' => 'Vintage',
+               'Casa del Habano' => 'La Casa del Habano',
+               'Duty Free' => 'Duty Free',
+               '免税' => 'Duty Free',
+               '友谊商店' => 'La Casa del Habano',
+               'Friendship Store' => 'La Casa del Habano',
+               'Tubos' => 'Tubos',
+               '管装' => 'Tubos',
+               'A/T' => 'Aluminum Tube',
+               '铝管' => 'Aluminum Tube',
+               '20支装' => '20-Count',
+               '25支装' => '25-Count',
+               '10支装' => '10-Count',
+               '5支装' => '5-Count',
+               '3支装' => '3-Count',
+               'Travel Humidor' => 'Travel Humidor',
+               '旅行保湿盒' => 'Travel Humidor',
+               
+               // Zodiac editions with many variations
+               '虎年' => 'Year of the Tiger',
+               '龙年' => 'Year of the Dragon',
+               '兔年' => 'Year of the Rabbit',
+               '蛇年' => 'Year of the Snake',
+               '马年' => 'Year of the Horse',
+               '羊年' => 'Year of the Sheep',
+               '猴年' => 'Year of the Monkey',
+               '鸡年' => 'Year of the Rooster',
+               '狗年' => 'Year of the Dog',
+               '猪年' => 'Year of the Pig',
+               '鼠年' => 'Year of the Rat',
+               '牛年' => 'Year of the Ox',
+               
+               // More flexible wrapper and process descriptors
+               '自然' => 'Natural',
+               '马杜罗' => 'Maduro',
+               '康涅狄格' => 'Connecticut',
+               '哈瓦那' => 'Habano',
+               '巴西' => 'Brazilian',
+               '圣安德烈斯' => 'San Andres',
+               '科罗霍' => 'Corojo',
+               '康尼狄格' => 'Connecticut',
+               '自然色' => 'Natural',
+               '黑色' => 'Maduro',
+               '褐色' => 'Maduro',
+               '红色' => 'Colorado',
+               '哈巴诺' => 'Habano',
+               '克里奥尔' => 'Criollo',
+               '巴西利亚' => 'Brasileño',
+               '墨西哥' => 'Mexican',
+               '日晒' => 'Sun Grown',
+               '阴生' => 'Shade Grown',
+               '阴生康' => 'Shade Grown Connecticut',
+           ),
+           
+           // Enhanced packaging terms with quantity pattern recognition
+           'packaging' => array(
+               // Quantity patterns with precise regex
+               '(\d+)支(?:装|盒)?' => '$1-Count',
+               '(\d+)支\((\d+)盒\)' => '$1-Count ($2 Boxes)',
+               '铝管(\d+)支(?:\((\d+)盒\))?' => 'Aluminum Tube $1-Count',
+               '纸盒(\d+)支(?:\((\d+)盒\))?' => 'Paper Box $1-Count',
+               '(\d+)×(\d+)支' => '$1 × $2-Count',
+               '(\d+)支\/盒' => '$1-Count/Box',
+               '(\d+)支装' => '$1-Count Pack',
+               
+               // Standard packaging types - expanded with more variants
+               '木盒' => 'Wooden Box',
+               '紙盒' => 'Paper Box',
+               '纸盒' => 'Paper Box',
+               '铝管' => 'Aluminum Tube',
+               'A/T' => 'Aluminum Tube',
+               '铝管单支' => 'Aluminum Tube Single',
+               '单支铝管' => 'Aluminum Tube Single',
+               '陶瓷罐' => 'Ceramic Jar',
+               '玻璃纸捆装' => 'Cellophane Bundle',
+               '瓷瓶包装' => 'Ceramic Container',
+               '玻纸' => 'Cellophane',
+               '铁盒' => 'Tin',
+               '抽盖木盒' => 'Slide Lid Box',
+               '翻盖木盒' => 'Flip Top Box',
+               '围栏木盒' => 'Cabinets',
+               '上漆木盒' => 'Varnished Box',
+               '未上漆木盒' => 'Unvarnished Box',
+               '单支' => 'Single',
+               '单' => 'Single',
+               '支' => 'Count',
+               '盒' => 'Box',
+               '保湿盒' => 'Humidor',
+               '雪茄柜' => 'Cabinet',
+               '雪茄保湿袋' => 'Humidifier Bag',
+               '旅行保湿盒' => 'Travel Humidor',
+               '礼盒' => 'Gift Box',
+               '套装' => 'Set',
+               '旅行装' => 'Travel Set',
+               '精美礼盒' => 'Luxury Gift Box',
+               '精装礼盒' => 'Premium Gift Box',
+               '原装盒' => 'Original Box',
+               '原盒' => 'Original Box',
+               '皮盒' => 'Leather Box',
+               '包装盒' => 'Packaging Box',
+               '礼品盒' => 'Gift Box',
+               '礼物盒' => 'Gift Box',
+               '收藏盒' => 'Collector Box',
+               '圆筒' => 'Tube',
+               '圆管' => 'Tube',
+               '塑料管' => 'Plastic Tube',
+               '玻璃管' => 'Glass Tube',
+               '玻璃盒' => 'Glass Box',
+               '亚克力盒' => 'Acrylic Box',
+               '透明盒' => 'Transparent Box',
+               '大礼盒' => 'Large Gift Box',
+               '迷你盒' => 'Mini Box',
+               '小盒' => 'Small Box',
+               '中盒' => 'Medium Box',
+               '大盒' => 'Large Box',
+               '特大盒' => 'Extra Large Box',
+               // Additional packaging types
+               '2支装' => '2-Count',
+               '3支装' => '3-Count',
+               '4支装' => '4-Count',
+               '5支装' => '5-Count',
+               '10支装' => '10-Count',
+               '12支装' => '12-Count',
+               '15支装' => '15-Count',
+               '16支装' => '16-Count',
+               '20支装' => '20-Count',
+               '24支装' => '24-Count',
+               '25支装' => '25-Count',
+               '50支装' => '50-Count',
+               '乌木盒' => 'Ebony Box',
+               '松木盒' => 'Pine Wood Box',
+               '雪松盒' => 'Cedar Box',
+               '描金盒' => 'Gold Trim Box',
+               '百年纪念盒' => 'Centennial Box',
+               '复古盒' => 'Vintage Box',
+               '首饰盒' => 'Jewelry Box',
+               '橡木桶' => 'Oak Barrel',
+               '冰箱' => 'Refrigerator',
+               '保鲜盒' => 'Freshness Box',
+               '手提盒' => 'Carry Case',
+               '展示盒' => 'Display Box',
+               '双层盒' => 'Double-Deck Box',
+               '三层盒' => 'Triple-Deck Box',
+               '蝶铰盒' => 'Butterfly Hinge Box',
+               '磁吸盒' => 'Magnetic Box',
+               '帆布包' => 'Canvas Bag',
+               '真皮盒' => 'Genuine Leather Box',
+               '巴西木盒' => 'Brazilian Wood Box',
+               '西班牙雪松' => 'Spanish Cedar',
+               '手工木盒' => 'Handcrafted Box',
+               '限量木盒' => 'Limited Edition Box',
+               '骨董盒' => 'Antique Box',
+               '签名限量盒' => 'Signed Limited Box',
+               '原厂盒' => 'Original Factory Box',
+               '圆形铁盒' => 'Round Tin',
+               '方形铁盒' => 'Square Tin',
+               '铝质礼盒' => 'Aluminum Gift Box',
+               '古巴原包装' => 'Original Cuban Packaging',
+               '彩盒' => 'Colored Box',
+               '描花木盒' => 'Engraved Wooden Box',
+           )
+       );
+   }
+   
+   /**
+    * Chinese Zodiac year mapping with corresponding calendar years
+    * This is crucial for accurate zodiac year detection
+    */
+   public static function get_zodiac_year_mapping() {
+       return array(
+           '鼠年' => array('2020', '2008', '1996', '1984', '1972', '2032', '1960', '1948', '1936', '2044'),
+           '牛年' => array('2021', '2009', '1997', '1985', '1973', '2033', '1961', '1949', '1937', '2045'),
+           '虎年' => array('2022', '2010', '1998', '1986', '1974', '2034', '1962', '1950', '1938', '2046'),
+           '兔年' => array('2023', '2011', '1999', '1987', '1975', '2035', '1963', '1951', '1939', '2047'),
+           '龙年' => array('2024', '2012', '2000', '1988', '1976', '2036', '1964', '1952', '1940', '2048'),
+           '蛇年' => array('2025', '2013', '2001', '1989', '1977', '2037', '1965', '1953', '1941', '2049'),
+           '马年' => array('2026', '2014', '2002', '1990', '1978', '2038', '1966', '1954', '1942', '2050'),
+           '羊年' => array('2027', '2015', '2003', '1991', '1979', '2039', '1967', '1955', '1943', '2051'),
+           '猴年' => array('2028', '2016', '2004', '1992', '1980', '2040', '1968', '1956', '1944', '2052'),
+           '鸡年' => array('2029', '2017', '2005', '1993', '1981', '2041', '1969', '1957', '1945', '2053'),
+           '狗年' => array('2030', '2018', '2006', '1994', '1982', '2042', '1970', '1958', '1946', '2054'),
+           '猪年' => array('2031', '2019', '2007', '1995', '1983', '2043', '1971', '1959', '1947', '2055')
+       );
+   }
+
+   /**
+    * Get mappings for regional distributors and official agents
+    * This is critical for identifying authentic cigars from different regions
+    */
+   public static function get_distributor_mappings() {
+       return array(
+           // Asian Pacific region
+           'pcc' => array('太平洋雪茄公司', '太平洋', '太平洋烟草', 'PCC', 'Pacific Cigar Company', '太平洋雪茄', 'Pacific Cigar', '太平洋公司'),
+           'pacific cigar company' => array('太平洋雪茄公司', '太平洋', '太平洋烟草', 'PCC', '太平洋雪茄', 'Pacific Cigar', '太平洋公司'),
+           'pacific cigar' => array('太平洋雪茄公司', '太平洋', '太平洋烟草', 'PCC', '太平洋雪茄', '太平洋公司'),
+           
+           // European region
+           'hunters & frankau' => array('亨特与弗兰考', '亨特', '亨特弗兰考', 'H&F', '亨特和弗兰考', '英国总代理', '英国总经销', '英国经销商'),
+           'h&f' => array('亨特与弗兰考', '亨特', '亨特弗兰考', '亨特和弗兰考', '英国总代理', '英国总经销', '英国经销商'),
+           'la casa del habano' => array('哈瓦那之家', '雪茄之家', 'LCDH', '哈瓦那雪茄屋', '哈瓦那专卖店', '官方专卖店', '官方零售店', '友谊商店'),
+           'lcdh' => array('哈瓦那之家', '雪茄之家', '哈瓦那雪茄屋', '哈瓦那专卖店', '官方专卖店', '官方零售店', '友谊商店'),
+           
+           // North American region
+           'habanos s.a.' => array('哈瓦那斯', '哈瓦那公司', '古巴雪茄公司', '哈瓦那雪茄公司', 'HSA', '古巴官方', '古巴国营'),
+           'hsa' => array('哈瓦那斯', '哈瓦那公司', '古巴雪茄公司', '哈瓦那雪茄公司', '古巴官方', '古巴国营'),
+           'phoenicia t.a.a. cyprus' => array('菲尼基亚', '塞浦路斯菲尼基亚', '菲尼基亚公司', '中东代理', '中东总代理', '中东总经销'),
+           'phoenicia' => array('菲尼基亚', '塞浦路斯菲尼基亚', '菲尼基亚公司', '中东代理', '中东总代理', '中东总经销'),
+           
+           // Latin American region
+           'intertabak ag' => array('国际烟草股份公司', '国际烟草', '因特巴克', '瑞士代理', '瑞士总代理', '瑞士总经销'),
+           'intertabak' => array('国际烟草股份公司', '国际烟草', '因特巴克', '瑞士代理', '瑞士总代理', '瑞士总经销'),
+           'corporación habanos' => array('哈瓦那集团', '哈瓦那斯集团', '古巴雪茄集团', '哈瓦那雪茄集团', '古巴官方集团'),
+           'corporacion habanos' => array('哈瓦那集团', '哈瓦那斯集团', '古巴雪茄集团', '哈瓦那雪茄集团', '古巴官方集团'),
+           
+           // Chinese region
+           'infifon hong kong' => array('英菲丰香港', '英菲丰', 'Infifon', '香港代理', '香港总代理', '香港总经销', '中国香港代理'),
+           'infifon' => array('英菲丰香港', '英菲丰', '香港代理', '香港总代理', '香港总经销', '中国香港代理'),
+           'china national tobacco' => array('中国烟草', '中烟', '中国烟草总公司', '中烟公司', '中国烟草专卖局', '烟草专卖局', '国烟'),
+           'cntc' => array('中国烟草', '中烟', '中国烟草总公司', '中烟公司', '中国烟草专卖局', '烟草专卖局', '国烟'),
+           
+           // Special International Distributors
+           'altadis' => array('奥特迪斯', '阿尔塔迪斯', 'Altadis', '西班牙总代理', '西班牙代理', '法国总代理', '法国代理'),
+           'gerard père et fils' => array('杰拉德父子', '杰拉德', 'Gerard', '比利时代理', '比利时总代理', '比利时总经销'),
+           'gerard' => array('杰拉德父子', '杰拉德', '比利时代理', '比利时总代理', '比利时总经销'),
+           'quinta avenida' => array('第五大道', '昆塔大道', 'Quinta Avenida', '德国代理', '德国总代理', '德国总经销'),
+           'cubacigar benelux' => array('古巴雪茄比荷卢', '比荷卢古巴雪茄', 'Cubacigar', '比荷卢代理', '比荷卢总代理', '荷兰代理', '比利时代理', '卢森堡代理'),
+           'cubacigar' => array('古巴雪茄比荷卢', '比荷卢古巴雪茄', '比荷卢代理', '比荷卢总代理', '荷兰代理', '比利时代理', '卢森堡代理'),
+           'topcigar' => array('顶级雪茄', '顶级雪茄公司', 'Top Cigar', '瑞典代理', '瑞典总代理', '北欧代理', '北欧总代理'),
+           
+           // Non-Cuban major distributors
+           'davidoff group' => array('大卫杜夫集团', '达维多夫集团', '奥廷格·大卫杜夫集团', '奥廷格大卫杜夫', 'Oettinger Davidoff Group', 'Oettinger Davidoff'),
+           'general cigar' => array('通用雪茄', '通用雪茄公司', 'General Cigar', '通用烟草', '美国通用雪茄'),
+           'altadis usa' => array('美国奥特迪斯', '美国阿尔塔迪斯', 'Altadis USA', '美国奥特迪斯公司', '美国阿尔塔迪斯公司'),
+           'scandinavian tobacco group' => array('北欧烟草集团', '斯堪的纳维亚烟草集团', 'STG', '北欧烟草', '斯堪的纳维亚烟草'),
+           'stg' => array('北欧烟草集团', '斯堪的纳维亚烟草集团', '北欧烟草', '斯堪的纳维亚烟草'),
+           'imperial brands' => array('帝国品牌', '帝国烟草', 'Imperial Tobacco', '帝国品牌公司', '帝国烟草公司'),
+           'imperial tobacco' => array('帝国品牌', '帝国烟草', '帝国品牌公司', '帝国烟草公司'),
+           
+           // Regional verification marks
+           'eer' => array('EER', '欧盟税票', '欧盟认证', '欧盟印花', '欧盟关税标志', '欧盟进口标志'),
+           'eun' => array('EUN', '英国税票', '英国认证', '英国印花', '英国关税标志', '英国进口标志'),
+           'duty paid uk' => array('英国完税', '英国税票', '英国认证', '英国印花', '英国关税标志', '英国进口标志'),
+           'duty paid' => array('完税', '已完税', '税票', '印花', '关税标志', '进口标志'),
+           'imported by' => array('进口商', '进口自', '由...进口', '输入者', '由...输入', '进口方'),
+           'distributed by' => array('经销商', '分销商', '经销自', '由...经销', '代理商', '代理自', '由...代理'),
+           
+           // Special edition identifiers
+           'travel retail exclusive' => array('旅行零售专供', '免税店专供', '旅行零售独家', '免税店独家', '飞机场专供', '机场专供', '旅行专供', '机场独家'),
+           'regional edition' => array('区域版', '地区限定', '区域限定版', '区域限定', '地区限定版', '地区专供', '区域专供', '专供版'),
+           'casa del habano exclusive' => array('哈瓦那之家专供', 'LCDH专供', '哈瓦那之家独家', 'LCDH独家', '专卖店专供', '专卖店独家'),
+           'duty free exclusive' => array('免税店专供', '免税专供', '免税店独家', '免税独家', '旅行零售专供', '旅行零售独家'),
+           'limited edition' => array('限量版', '限定版', '限量', '限定', 'LE', '限量生产', '限定生产', '限量发行'),
+           'vintage' => array('年份', '陈年', '老年', '老年份', '特定年份', '特别年份', '特别年代', '特定年代'),
+           
+           // Authentication and serial numbers
+           'serial no' => array('序列号', '序号', '编号', '序列编号', '出厂编号', '生产编号', '防伪编号', '防伪号'),
+           'serial number' => array('序列号', '序号', '编号', '序列编号', '出厂编号', '生产编号', '防伪编号', '防伪号'),
+           'authentication code' => array('认证码', '防伪码', '验证码', '真品码', '真伪码', '验真码', '确认码'),
+           'verification code' => array('验证码', '核验码', '核查码', '认证码', '防伪码', '真品码', '真伪码'),
+           'hologram' => array('全息图', '激光标', '激光防伪', '全息防伪', '光变标', '光变防伪', '激光认证'),
+           'authenticity seal' => array('真品封签', '防伪封签', '真品标签', '防伪标签', '真伪封签', '真伪标签', '认证封签'),
+           'cuban warranty seal' => array('古巴保证封签', '古巴封签', '古巴认证封签', '哈瓦那封签', '哈瓦那认证封签', '古巴防伪封签'),
+           'warranty seal' => array('保证封签', '认证封签', '防伪封签', '保证标签', '认证标签', '防伪标签'),
+           
+           // Specific import codes
+           'prc duty paid' => array('中国完税', '中国税票', '中国认证', '中国印花', '中国关税标志', '中国进口标志', '中国海关完税'),
+           'hk duty paid' => array('香港完税', '香港税票', '香港认证', '香港印花', '香港关税标志', '香港进口标志', '香港海关完税'),
+           'swiss duty paid' => array('瑞士完税', '瑞士税票', '瑞士认证', '瑞士印花', '瑞士关税标志', '瑞士进口标志', '瑞士海关完税'),
+           'german duty paid' => array('德国完税', '德国税票', '德国认证', '德国印花', '德国关税标志', '德国进口标志', '德国海关完税'),
+           'french duty paid' => array('法国完税', '法国税票', '法国认证', '法国印花', '法国关税标志', '法国进口标志', '法国海关完税'),
+           'italian duty paid' => array('意大利完税', '意大利税票', '意大利认证', '意大利印花', '意大利关税标志', '意大利进口标志'),
+           'spanish duty paid' => array('西班牙完税', '西班牙税票', '西班牙认证', '西班牙印花', '西班牙关税标志', '西班牙进口标志'),
+           'japanese duty paid' => array('日本完税', '日本税票', '日本认证', '日本印花', '日本关税标志', '日本进口标志', '日本海关完税'),
+           'canadian duty paid' => array('加拿大完税', '加拿大税票', '加拿大认证', '加拿大印花', '加拿大关税标志', '加拿大进口标志'),
+           'australian duty paid' => array('澳大利亚完税', '澳大利亚税票', '澳大利亚认证', '澳大利亚印花', '澳大利亚关税标志'),
+           
+           // Specific Asia Pacific distributors
+           'bluebell' => array('蓝钟', '香港蓝钟', '蓝钟公司', '蓝钟集团', 'Bluebell Group', '香港蓝钟集团'),
+           'red dot' => array('红点', '红点集团', '新加坡红点', '红点公司', 'Red Dot', '新加坡代理', '新加坡总代理'),
+           'firebloom' => array('火花绽放', '火花公司', '台湾火花', '台湾代理', '台湾总代理', 'Firebloom', '台湾经销商'),
+           'pacific cigar taiwan' => array('台湾太平洋雪茄', '台湾太平洋', '台湾PCC', '台湾太平洋烟草', '台湾太平洋公司', '台湾代理', '台湾总代理'),
+           'the pacific cigar thailand' => array('泰国太平洋雪茄', '泰国太平洋', '泰国PCC', '泰国太平洋烟草', '泰国太平洋公司', '泰国代理', '泰国总代理'),
+           'cigar emporium' => array('雪茄商场', '新加坡雪茄商场', '雪茄集散地', '新加坡雪茄集散地', 'Cigar Emporium', '新加坡经销商')
+       );
+   }
+// static data 9999
+
+   // Pre-indexed keyword cache
+   private static $keyword_cache = null;
+   
+   // Brand mapping cache
+   private static $brand_mapping_cache = null;
+   
+   /**
+    * Initialize caches and pre-indexed data structures
+    */
+   public static function initialize_caches() {
+       if (self::$keyword_cache === null) {
+           self::$keyword_cache = array();
+           
+           // Pre-index all brand mappings
+           $cuban_brands = self::get_cuban_brand_mappings();
+           $non_cuban_brands = self::get_non_cuban_brand_mappings();
+           $all_brands = array_merge($cuban_brands, $non_cuban_brands);
+           
+           self::$brand_mapping_cache = array();
+           foreach ($all_brands as $primary => $variants) {
+               foreach ($variants as $variant) {
+                   self::$brand_mapping_cache[strtolower($variant)] = $primary;
+               }
+           }
+           
+           // Pre-index vitola mappings
+           $size_mappings = self::get_size_mappings();
+           foreach ($size_mappings as $english => $chinese_terms) {
+               foreach ($chinese_terms as $chinese) {
+                   self::$keyword_cache[strtolower($chinese)] = array(
+                       'type' => 'vitola',
+                       'value' => $english
+                   );
+               }
+               self::$keyword_cache[strtolower($english)] = array(
+                   'type' => 'vitola',
+                   'value' => $english
+               );
+           }
+           
+           // Pre-index special editions
+           $special_mappings = self::get_special_mappings();
+           foreach ($special_mappings['special_editions'] as $chinese => $english) {
+               self::$keyword_cache[strtolower($chinese)] = array(
+                   'type' => 'special_edition',
+                   'value' => $english
+               );
+               self::$keyword_cache[strtolower($english)] = array(
+                   'type' => 'special_edition',
+                   'value' => $english
+               );
+           }
+           
+           // Pre-index distributors
+           $distributor_mappings = self::get_distributor_mappings();
+           foreach ($distributor_mappings as $primary => $variants) {
+               foreach ($variants as $variant) {
+                   self::$keyword_cache[strtolower($variant)] = array(
+                       'type' => 'distributor',
+                       'value' => $primary
+                   );
+               }
+           }
+       }
+   }
+   
+   /**
+    * Process a row from the Cuban Cigar CSV and find matches
+    * Enhanced with strict brand matching and keyword categorization
+    * 
+    * @param array $csv_row A row from the CSV with keys matching the CSV headers
+    * @param bool $debug Whether to include debug information
+    * @return array Matching results
+    */
+   public static function process_csv_row($csv_row, $debug = false) {
+       // Extract and sanitize CSV data
+       $title = isset($csv_row['Title']) ? trim($csv_row['Title']) : '';
+       $description = isset($csv_row['Description']) ? trim($csv_row['Description']) : '';
+       $ring_size = isset($csv_row['Ring Size']) ? trim($csv_row['Ring Size']) : '';
+       $length = isset($csv_row['Length']) ? trim($csv_row['Length']) : '';
+       $packaging = isset($csv_row['Packaging']) ? trim($csv_row['Packaging']) : '';
+       $main_category = isset($csv_row['Main Category']) ? trim($csv_row['Main Category']) : '';
+       
+       // Clean length (remove "mm" if present)
+       $length = preg_replace('/\s*mm\s*$/i', '', $length);
+       
+       // Format dimensions string
+       $dimensions = '';
+       if (!empty($ring_size) && !empty($length)) {
+           $dimensions = $ring_size . '/' . $length;
+       }
+       
+       // Detect product type
+       $product_type = self::detect_product_type($title);
+       
+       // Initialize debug log
+       if ($debug && !defined('KT_DEBUG_INITIALIZED')) {
+           KT_Cigar_Debug::init('', 3); // Set debug level to 3 (basic info)
+           define('KT_DEBUG_INITIALIZED', true);
+       }
+       
+       // Log CSV data being processed if debug is enabled
+       if ($debug && class_exists('KT_Cigar_Debug')) {
+           KT_Cigar_Debug::log("Processing CSV row: " . $title, 2);
+           KT_Cigar_Debug::log("Ring: $ring_size, Length: $length, Type: $product_type", 2);
+       }
+       
+       // Process the supplier product with our enhanced methods
+       $supplier_product = self::process_supplier_product($title, $dimensions);
+       
+       // Categorize keywords for the supplier product
+       $supplier_product['categorized_keywords'] = self::categorize_keywords($supplier_product['keywords']);
+       
+       // If description is provided, enhance the product info
+       if (!empty($description)) {
+           $description_keywords = self::extract_keywords($description);
+           $supplier_product['keywords'] = array_merge($supplier_product['keywords'], $description_keywords);
+           
+           // Re-categorize with additional keywords
+           $supplier_product['categorized_keywords'] = self::categorize_keywords($supplier_product['keywords']);
+           
+           // Try to extract more info from description
+           if (empty($supplier_product['vitola']) && !empty($description)) {
+               $size_mappings = self::get_size_mappings();
+               foreach ($size_mappings as $english => $chinese_terms) {
+                   if (stripos($description, $english) !== false) {
+                       $supplier_product['vitola'] = $english;
+                       $supplier_product['keywords'][] = $english;
+                       break;
+                   }
+               }
+           }
+           
+           // Try to extract brand from description if not found in title
+           if (empty($supplier_product['brand']) && !empty($description)) {
+               $extracted_brand = self::extract_brand($description);
+               if ($extracted_brand) {
+                   $supplier_product['brand'] = $extracted_brand;
+                   $supplier_product['keywords'][] = $extracted_brand;
+               }
+           }
+       }
+       
+       // Add packaging info if provided
+       if (!empty($packaging)) {
+           $supplier_product['packaging'] = $packaging;
+           $supplier_product['keywords'][] = $packaging;
+           
+           // Extract count from packaging if available
+           if (preg_match('/(\d+)\s*(?:支|count|pc|pcs)/i', $packaging, $count_matches)) {
+               $supplier_product['count'] = intval($count_matches[1]);
+               $supplier_product['keywords'][] = $count_matches[1] . '-Count';
+           }
+       }
+       
+       // Find matching products
+       $matches = self::find_best_matches($supplier_product, self::get_internal_products(), 5, $debug);
+       
+       // Format results
+       $results = array();
+       foreach ($matches as $match) {
+           if ($match['score'] >= 50) { // Only include matches with a score of 50 or higher
+               $results[] = array(
+                   'sku' => $match['product']['product_code'],
+                   'title' => $match['product']['title'],
+                   'score' => $match['score'],
+                   'match_type' => $match['match_type'],
+                   'matched_terms' => $match['matched_terms']
+               );
+           }
+       }
+       
+       return $results;
+   }
+   
+   /**
+    * Get all internal products from database with caching
+    * 
+    * @return array Array of processed internal products
+    */
+   private static function get_internal_products() {
+       // Check WordPress transient cache first
+       $cache_key = 'kt_cigar_internal_products';
+       $cached_products = get_transient($cache_key);
+       
+       if ($cached_products !== false) {
+           return $cached_products;
+       }
+       
+       global $wpdb;
+       
+       // Get all products from master table
+       $products = $wpdb->get_results("
+           SELECT sku, product_title, brand, product_category, product_type, 
+                  seat_row, seat_number, pipe_tobacco_id, description,
+                  meta_description, attributes
+           FROM {$wpdb->prefix}master_products
+           ORDER BY sku ASC
+       ");
+       
+       // Process each internal product
+       $internal_products = array();
+       foreach ($products as $product) {
+           $dimensions = '';
+           if (!empty($product->seat_row)) {
+               $dimensions .= $product->seat_row;
+               if (!empty($product->seat_number)) {
+                   $dimensions .= '/' . $product->seat_number;
+               }
+           } elseif (!empty($product->seat_number)) {
+               $dimensions = $product->seat_number;
+           }
+           
+           $product_type = isset($product->product_type) ? $product->product_type : 'cigar';
+           
+           // Process the internal product
+           $processed_product = self::process_internal_product(
+               $product->sku,
+               $product->product_title,
+               $dimensions,
+               $product_type
+           );
+           
+           // Add description keywords if available
+           if (!empty($product->description)) {
+               $description_keywords = self::extract_keywords($product->description);
+               $processed_product['keywords'] = array_merge($processed_product['keywords'], $description_keywords);
+           }
+           
+           // Extract attributes as JSON if available
+           if (!empty($product->attributes)) {
+               $attributes = json_decode($product->attributes, true);
+               if (is_array($attributes)) {
+                   foreach ($attributes as $attr_name => $attr_value) {
+                       if (!empty($attr_value)) {
+                           $processed_product['keywords'][] = $attr_value;
+                       }
+                   }
+               }
+           }
+           
+           // Categorize keywords for internal product
+           $processed_product['categorized_keywords'] = self::categorize_keywords($processed_product['keywords']);
+           
+           // Add to internal products
+           $internal_products[] = $processed_product;
+       }
+       
+       // Cache the processed products
+       set_transient($cache_key, $internal_products, KT_CIGAR_CACHE_EXPIRY);
+       
+       return $internal_products;
+   }
+   
+   /**
+    * Enhanced year extraction from product titles
+    * Uses both explicit year patterns and zodiac year detection
+    * 
+    * @param string $title Product title
+    * @return string|null Extracted year or null
+    */
+   public static function extract_year($title) {
+       // Look for standard year formats with explicit markers
+       if (preg_match('#\b(19|20)(\d{2})(?:年|限量版?|LE|Limited Edition)?(?:\s|$)#iu', $title, $matches)) {
+           return $matches[1] . $matches[2]; // Return full year (e.g., "2022")
+       }
+       
+       // Look for standalone years without context
+       if (preg_match('#\b(19|20)(\d{2})\b#u', $title, $matches)) {
+           return $matches[1] . $matches[2];
+       }
+       
+       // Check for LE format years
+       if (preg_match('#\b(\d{4})LE\b#i', $title, $matches)) {
+           return $matches[1];
+       }
+       
+       // Check for two-digit year format with LE
+       if (preg_match('#\b(\d{2})LE\b#i', $title, $matches)) {
+           $year = intval($matches[1]);
+           return ($year < 50) ? '20' . sprintf('%02d', $year) : '19' . sprintf('%02d', $year);
+       }
+       
+       // Check for short years (e.g., "'21" or "21")
+       if (preg_match("#'?(\d{2})(?:\s|$)#", $title, $matches)) {
+           $year = intval($matches[1]);
+           // Only consider it a year if it's a reasonable number (1950-2049)
+           if ($year >= 0 && $year <= 49) {
+               return '20' . sprintf('%02d', $year);
+           } elseif ($year >= 50 && $year <= 99) {
+               return '19' . sprintf('%02d', $year);
+           }
+       }
+       
+       // Check for production numbers (e.g., 全球限量3000盒)
+       if (preg_match('#全球限量(\d+)盒#u', $title, $matches)) {
+           return 'Limited Production: ' . $matches[1];
+       }
+       
+       // Look for zodiac years
+       $zodiac_years = self::get_zodiac_year_mapping();
+       
+       foreach ($zodiac_years as $zodiac => $years) {
+           if (mb_stripos($title, $zodiac) !== false) {
+               // If we find a specific year with the zodiac, use that
+               foreach ($years as $year) {
+                   if (mb_stripos($title, $year) !== false) {
+                       return $year;
+                   }
+               }
+               
+               // If no specific year is mentioned, use the most recent or upcoming zodiac year
+               $current_year = date('Y');
+               $closest_year = null;
+               $min_diff = PHP_INT_MAX;
+               
+               foreach ($years as $year) {
+                   $diff = abs(intval($year) - intval($current_year));
+                   if ($diff < $min_diff) {
+                       $min_diff = $diff;
+                       $closest_year = $year;
+                   }
+               }
+               
+               return $closest_year;
+           }
+       }
+       
+       // Look for vintage or aged indicators
+       if (preg_match('#(?:vintage|年份)\s*(\d{4})#i', $title, $matches)) {
+           return $matches[1];
+       }
+       
+       // Look for "Anniversary" with numbers
+       if (preg_match('#(\d{1,3})(?:th|周年|週年)#i', $title, $matches)) {
+           return $matches[1] . 'th Anniversary';
+       }
+       
+       // Check for anniversary phrases without specific numbers
+       if (stripos($title, 'anniversary') !== false || mb_stripos($title, '周年') !== false) {
+           return 'Anniversary';
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract special edition type from product title
+    * Detects zodiac editions, limited editions, anniversaries, etc.
+    * 
+    * @param string $title Product title
+    * @return array Special edition types found
+    */
+   public static function extract_edition_type($title) {
+       $editions = array();
+       
+       // Check for zodiac editions
+       $zodiac_mapping = self::get_zodiac_year_mapping();
+       foreach ($zodiac_mapping as $zodiac => $years) {
+           if (mb_stripos($title, $zodiac) !== false) {
+               $editions['zodiac'] = $zodiac;
+               break;
+           }
+       }
+       
+       // Check for millennium editions
+       if (mb_stripos($title, '千禧') !== false || stripos($title, 'millennium') !== false) {
+           $editions['millennium'] = 'Millennium';
+       }
+       
+       // Check for anniversary editions
+       if (preg_match('#(\d+)(?:周年|週年|th\s*Anniversary)#iu', $title, $matches)) {
+           $editions['anniversary'] = $matches[1] . 'th Anniversary';
+       }
+       
+       // Check for general anniversary mentions
+       if (mb_stripos($title, '周年') !== false || 
+           mb_stripos($title, 'Anniversary') !== false || 
+           mb_stripos($title, 'Aniversario') !== false) {
+           
+           if (!isset($editions['anniversary'])) {
+               $editions['anniversary'] = 'Anniversary';
+           }
+       }
+       
+       // Check for limited editions
+       if (mb_stripos($title, '限量') !== false || 
+           mb_stripos($title, 'Limited') !== false || 
+           mb_stripos($title, 'LE') !== false) {
+           $editions['limited'] = 'Limited Edition';
+       }
+       
+       // Check for regional editions
+       $regions = array(
+           '古巴地限' => 'Ex. Cuba',
+           '西班牙地限' => 'Ex. Spain',
+           '葡萄牙地限' => 'Ex. Portugal',
+           '意大利地限' => 'Ex. Italy',
+           '港澳地限' => 'Ex. Hong Kong & Macau',
+           '港澳地区限定' => 'Ex. Hong Kong & Macau',
+           '亚太地区' => 'Asia Pacific',
+           '亚太地限' => 'Asia Pacific',
+           '北亚地限' => 'Northern Asia',
+           '南亚地限' => 'Southern Asia',
+           '东亚地限' => 'Eastern Asia',
+           '西亚地限' => 'Western Asia',
+           '欧洲地限' => 'Europe',
+           '北美地限' => 'North America',
+           '美国地限' => 'United States',
+           '加拿大地限' => 'Canada',
+           '墨西哥地限' => 'Mexico',
+           '德国地限' => 'Germany',
+           '法国地限' => 'France',
+           '英国地限' => 'United Kingdom',
+           '瑞士地限' => 'Switzerland',
+           '俄罗斯地限' => 'Russia',
+           '日本地限' => 'Japan',
+           '韩国地限' => 'Korea',
+           '澳大利亚地限' => 'Australia',
+           '新西兰地限' => 'New Zealand'
+       );
+       
+       foreach ($regions as $region_zh => $region_en) {
+           if (mb_stripos($title, $region_zh) !== false) {
+               $editions['regional'] = $region_en;
+               break;
+           }
+       }
+       
+       // Check for special editions
+       if (mb_stripos($title, '特别') !== false || 
+           mb_stripos($title, '特选') !== false || 
+           mb_stripos($title, 'special') !== false || 
+           mb_stripos($title, 'especial') !== false) {
+           $editions['special'] = 'Special Edition';
+       }
+       
+       // Check for reserva
+       if (mb_stripos($title, '珍藏') !== false || 
+           mb_stripos($title, 'reserva') !== false) {
+           $editions['reserva'] = 'Reserva';
+       }
+       
+       // Check for gran reserva
+       if (mb_stripos($title, '特级珍藏') !== false || 
+           mb_stripos($title, 'gran reserva') !== false) {
+           $editions['gran_reserva'] = 'Gran Reserva';
+       }
+       
+       // Check for vintage
+       if (mb_stripos($title, '年份') !== false || 
+           mb_stripos($title, 'vintage') !== false) {
+           $editions['vintage'] = 'Vintage';
+       }
+       
+       // Check for aged
+       if (mb_stripos($title, '陈年') !== false || 
+           mb_stripos($title, '老年份') !== false || 
+           mb_stripos($title, 'aged') !== false || 
+           mb_stripos($title, 'anejados') !== false) {
+           $editions['aged'] = 'Aged';
+       }
+       
+       // Check for numbered editions
+       if (mb_stripos($title, '独立编号') !== false || 
+           mb_stripos($title, '编号') !== false || 
+           mb_stripos($title, 'numbered') !== false) {
+           $editions['numbered'] = 'Numbered';
+       }
+       
+       // Check for limited production
+       if (preg_match('#全球限量(\d+)盒#u', $title, $matches)) {
+           $editions['limited_production'] = 'Limited Production: ' . $matches[1];
+       }
+       
+       return $editions;
+   }
+   
+   /**
+    * Enhanced pattern matching for dimension recognition in various formats
+    * Improved to handle more dimension formats and inconsistencies
+    */
+   public static function parse_dimensions($dimension_str) {
+       $result = array(
+           'ring_gauge' => null,
+           'length' => null,
+           'format' => null
+       );
+       
+       // Handle N/A or empty dimensions
+       if (empty($dimension_str) || $dimension_str == 'N/A' || $dimension_str == 'N/A/N/A') {
+           return $result;
+       }
+       
+       // Normalize dimension string - replace various separators with standard format
+       $dimension_str = preg_replace('#\s+#u', '', $dimension_str); // Remove all whitespace
+       $dimension_str = preg_replace('#[*×x\\\]#u', '/', $dimension_str); // Standardize separator
+       $dimension_str = preg_replace('#(mm|MM|厘米|cm)#u', '', $dimension_str); // Remove measurement units
+       
+       // Extract numeric values from the string
+       preg_match_all('/\d+\.?\d*/', $dimension_str, $numbers);
+       
+       if (!empty($numbers[0]) && count($numbers[0]) >= 2) {
+           $num1 = floatval($numbers[0][0]);
+           $num2 = floatval($numbers[0][1]);
+           
+           // Determine which is ring gauge and which is length using industry standards
+           // Ring gauge is typically 20-70, length is typically 80-210mm
+           if ($num1 >= 20 && $num1 <= 70 && $num2 >= 80 && $num2 <= 210) {
+               $result['ring_gauge'] = $num1;
+               $result['length'] = $num2;
+               $result['format'] = "$num1/$num2";
+           } 
+           else if ($num2 >= 20 && $num2 <= 70 && $num1 >= 80 && $num1 <= 210) {
+               $result['ring_gauge'] = $num2;
+               $result['length'] = $num1;
+               $result['format'] = "$num2/$num1";
+           }
+           // Handle non-standard ranges but maintain logical assignment
+           else if ($num1 < $num2) {
+               // Smaller number is more likely ring gauge, larger is length
+               $result['ring_gauge'] = $num1;
+               $result['length'] = $num2;
+               $result['format'] = "$num1/$num2";
+           } 
+           else {
+               $result['ring_gauge'] = $num2;
+               $result['length'] = $num1;
+               $result['format'] = "$num2/$num1";
+           }
+       }
+       // Special case for single number - might be just ring gauge
+       else if (!empty($numbers[0]) && count($numbers[0]) == 1) {
+           $num = floatval($numbers[0][0]);
+           if ($num >= 20 && $num <= 70) {
+               $result['ring_gauge'] = $num;
+           }
+           else if ($num >= 80 && $num <= 210) {
+               $result['length'] = $num;
+           }
+       }
+       
+       return $result;
+   }
+   
+   /**
+    * Enhanced comparison of dimensions
+    * Provides a more accurate score for dimension matching
+    * 
+    * @param array $supplier_dimensions Supplier dimensions
+    * @param array $internal_dimensions Internal dimensions
+    * @return float Dimension match score (0-1)
+    */
+   public static function compare_dimensions($supplier_dimensions, $internal_dimensions) {
+       if (!$supplier_dimensions['ring_gauge'] || !$internal_dimensions['ring_gauge'] || 
+           !$supplier_dimensions['length'] || !$internal_dimensions['length']) {
+           return 0.5; // Can't compare incomplete dimensions, provide neutral score
+       }
+       
+       // More precise ring gauge comparison - ring gauge is critical
+       $ring_tolerance = 2; // Tolerance for ring gauge difference
+       $length_tolerance = 5; // Tolerance for length difference
+       
+       $ring_diff = abs($supplier_dimensions['ring_gauge'] - $internal_dimensions['ring_gauge']);
+       $length_diff = abs($supplier_dimensions['length'] - $internal_dimensions['length']);
+       
+       // Ring gauge is more important than length for identification
+       $ring_weight = 0.7;
+       $length_weight = 0.3;
+       
+       $ring_match = max(0, 1 - ($ring_diff / $ring_tolerance));
+       $length_match = max(0, 1 - ($length_diff / $length_tolerance));
+       
+       // Apply sigmoid scaling for smoother transition between scores
+       $ring_match = 1 / (1 + exp(-10 * ($ring_match- 0.5)));
+       $length_match = 1 / (1 + exp(-10 * ($length_match - 0.5)));
+       
+       $dimension_score = ($ring_weight * $ring_match) + ($length_weight * $length_match);
+       
+       // Bonus for exact match
+       if ($ring_diff == 0 && $length_diff == 0) {
+           $dimension_score = 1.0;
+       }
+       // Bonus for very close match
+       else if ($ring_diff <= 1 && $length_diff <= 3) {
+           $dimension_score = min(1.0, $dimension_score * 1.2);
+       }
+       
+       return $dimension_score;
+   }
+}
+
+/**
+ * Enhanced KT_Cigar_Matcher class with improved matching algorithm
+ * Implements brand-strict matching and enhanced keyword categorization
+ * 
+ * @version 5.0.0
+ */
+class KT_Cigar_Matcher_Enhanced {
+    // Product type constants
+    const TYPE_CIGAR = 'cigar';
+    const TYPE_CIGARETTE = 'cigarette'; 
+    const TYPE_PIPE_TOBACCO = 'pipe_tobacco';
+    const TYPE_HUMIDOR = 'humidor';
+    const TYPE_ACCESSORY = 'accessory';
+    const TYPE_UNKNOWN = 'unknown';
+    
+    // Match type constants
+    const MATCH_EXACT = 'exact_match';
+    const MATCH_DIMENSION = 'dimension_match';
+    const MATCH_BRAND = 'brand_match';
+    const MATCH_PARTIAL = 'partial_match';
+    const MATCH_NONE = 'no_match';
+    
+    // Cache settings
+    private static $cache_prefix = 'kt_cigar_match_';
+    private static $cache_expiry = KT_CIGAR_CACHE_EXPIRY;
+    
+    /**
+     * Main matching function with enhanced brand-strict matching
+     * 
+     * @param string $supplier_title Supplier product title
+     * @param string $dimensions Product dimensions (format: RG/Length)
+     * @return array Processed supplier product data
+     */
+    public static function process_supplier_product($supplier_title, $dimensions = '') {
+        // Initialize caches
+        KT_Cigar_Mappings::initialize_caches();
+        
+        // Detect product type first
+        $product_type = self::detect_product_type($supplier_title);
+        
+        // Basic title cleaning
+        $cleaned_title = self::clean_title($supplier_title);
+        
+        // Extract all possible keywords with enhanced extraction
+        $keywords = self::extract_keywords($cleaned_title);
+        
+        // Extract brand with enhanced brand detection
+        $brand = self::extract_brand($cleaned_title);
+        
+        // Extract series/model information
+        $series = self::extract_series($cleaned_title);
+        
+        // Extract vitola
+        $vitola = self::extract_vitola($cleaned_title, $dimensions);
+        
+        // Extract year information
+        $year = KT_Cigar_Mappings::extract_year($cleaned_title);
+        
+        // Extract count
+        $count = self::extract_count($cleaned_title);
+        
+        // Extract edition type
+        $edition_types = KT_Cigar_Mappings::extract_edition_type($cleaned_title);
+        
+        // Parse dimensions
+        $parsed_dimensions = KT_Cigar_Mappings::parse_dimensions($dimensions);
+        
+        // Extract any model numbers
+        $model_number = self::extract_model_number($cleaned_title);
+        
+        // Extract packaging information
+        $packaging = self::extract_packaging($cleaned_title);
+        
+        // Extract regional information
+        $regional = self::extract_regional($cleaned_title);
+        
+        // Categorize keywords
+        $categorized_keywords = self::categorize_keywords($keywords);
+        
+        $result = array(
+            'original_title' => $supplier_title,
+            'cleaned_title' => $cleaned_title,
+            'product_type' => $product_type,
+            'brand' => $brand,
+            'series' => $series,
+            'vitola' => $vitola,
+            'year' => $year,
+            'count' => $count,
+            'dimensions' => $parsed_dimensions,
+            'dimensions_string' => $dimensions,
+            'keywords' => $keywords,
+            'categorized_keywords' => $categorized_keywords,
+            'model_number' => $model_number,
+            'packaging' => $packaging,
+            'edition_types' => $edition_types,
+            'regional' => $regional
+        );
+        
+        // Log processed supplier product for debugging
+        if (defined('KT_DEBUG_INITIALIZED') && KT_DEBUG_INITIALIZED) {
+            KT_Cigar_Debug::log("Supplier product processed: " . json_encode($result), 3);
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Process internal product with enhanced categorization
+     * 
+     * @param string $product_code Internal product code
+     * @param string $title Internal product title
+     * @param string $dimensions Dimensions
+     * @param string $product_type Product type
+     * @return array Processed internal product data
+     */
+    public static function process_internal_product($product_code, $title, $dimensions = '', $product_type = 'cigar') {
+        // Initialize caches
+        KT_Cigar_Mappings::initialize_caches();
+        
+        // Clean and process title
+        $cleaned_title = self::clean_title($title);
+        
+        // Extract all possible keywords
+        $keywords = self::extract_keywords($cleaned_title);
+        
+        // Extract brand
+        $brand = self::extract_brand($cleaned_title);
+        
+        // Extract series
+        $series = self::extract_series($cleaned_title);
+        
+        // Extract vitola
+        $vitola = self::extract_vitola($cleaned_title, $dimensions);
+        
+        // Extract year
+        $year = KT_Cigar_Mappings::extract_year($cleaned_title);
+        
+        // Extract count
+        $count = self::extract_count($cleaned_title);
+        
+        // Extract edition type
+        $edition_types = KT_Cigar_Mappings::extract_edition_type($cleaned_title);
+        
+        // Parse dimensions
+        $parsed_dimensions = KT_Cigar_Mappings::parse_dimensions($dimensions);
+        
+        // Categorize keywords
+        $categorized_keywords = self::categorize_keywords($keywords);
+        
+        return array(
+            'product_code' => $product_code,
+            'title' => $title,
+            'cleaned_title' => $cleaned_title,
+            'product_type' => $product_type,
+            'brand' => $brand,
+            'series' => $series,
+            'vitola' => $vitola,
+            'year' => $year,
+            'count' => $count,
+            'dimensions' => $parsed_dimensions,
+            'dimensions_string' => $dimensions,
+            'keywords' => $keywords,
+            'categorized_keywords' => $categorized_keywords,
+            'edition_types' => $edition_types
+        );
+    }
+    
+    /**
+     * Find best matches for a supplier product against internal products
+     * Enhanced with brand-strict matching and improved scoring
+     * 
+     * @param array $supplier_product Processed supplier product
+     * @param array $internal_products Array of processed internal products
+     * @param int $limit Number of matches to return
+     * @param bool $debug Enable debug output
+     * @return array Best matching internal products
+     */
+    public static function find_best_matches($supplier_product, $internal_products, $limit = 5, $debug = false) {
+        // Check cache first
+        $cache_key = self::$cache_prefix . md5(json_encode($supplier_product));
+        $cached_result = get_transient($cache_key);
+        
+        if ($cached_result !== false && !$debug) {
+            return $cached_result;
+        }
+        
+        $matches = array();
+        
+        // First pass: Filter by brand (STRICT) - only consider products with same brand
+        $brand_filtered_products = array();
+        if (!empty($supplier_product['brand'])) {
+            $supplier_brand_lower = strtolower($supplier_product['brand']);
+            
+            foreach ($internal_products as $internal_product) {
+                if (!empty($internal_product['brand'])) {
+                    $internal_brand_lower = strtolower($internal_product['brand']);
+                    
+                    // Check if brands match (accounting for variations)
+                    if ($supplier_brand_lower === $internal_brand_lower ||
+                        self::are_brands_equivalent($supplier_product['brand'], $internal_product['brand'])) {
+                        $brand_filtered_products[] = $internal_product;
+                    }
+                }
+            }
+            
+            // If no brand matches found, return empty results (strict brand matching)
+            if (empty($brand_filtered_products)) {
+                if ($debug) {
+                    KT_Cigar_Debug::log("No brand matches found for: " . $supplier_product['brand'], 2);
+                }
+                return array();
+            }
+        } else {
+            // If no brand identified, use all products (but with penalty)
+            $brand_filtered_products = $internal_products;
+        }
+        
+        // Process batch of products for efficiency
+        $batch_size = defined('KT_CIGAR_BATCH_SIZE') ? KT_CIGAR_BATCH_SIZE : 50;
+        $batch_count = 0;
+        
+        foreach ($brand_filtered_products as $internal_product) {
+            $batch_count++;
+            
+            // Calculate match score with enhanced algorithm
+            $match_score = self::calculate_enhanced_match_score($supplier_product, $internal_product);
+            
+            // Determine match type based on highest scoring components
+            $match_type = self::determine_match_type($match_score);
+            
+            // Get total score
+            $total_score = self::calculate_total_score($match_score);
+            
+            // Only keep matches with score above threshold
+            if ($total_score >= 40) {
+                $matches[] = array(
+                    'product' => $internal_product,
+                    'score' => $total_score,
+                    'match_type' => $match_type,
+                    'matched_terms' => $match_score['matched_terms'],
+                    'score_breakdown' => $match_score,
+                    'categorized_matches' => $match_score['categorized_matches']
+                );
+            }
+            
+            // Process in batches to improve performance
+            if ($batch_count >= $batch_size) {
+                usleep(1000); // Small delay to prevent memory issues
+                $batch_count = 0;
+            }
+        }
+        
+        // Sort matches by score
+        usort($matches, function($a, $b) {
+            return $b['score'] - $a['score'];
+        });
+        
+        // Limit results
+        $matches = array_slice($matches, 0, $limit);
+        
+        // Cache results
+        if (!$debug) {
+            set_transient($cache_key, $matches, self::$cache_expiry);
+        }
+        
+        // Log results for debugging
+        if ($debug && defined('KT_DEBUG_INITIALIZED')) {
+            foreach ($matches as $index => $match) {
+                KT_Cigar_Debug::log_match(
+                    $supplier_product['original_title'],
+                    $match['product']['title'],
+                    $match['score'],
+                    $match['match_type'],
+                    array(
+                        'categorized_keywords' => $supplier_product['categorized_keywords'],
+                        'score_breakdown' => $match['score_breakdown'],
+                        'categorized_matches' => $match['categorized_matches']
+                    )
+                );
+            }
+        }
+        
+        return $matches;
+    }
+    
+    /**
+     * Calculate enhanced match score with category-based weighting
+     * 
+     * @param array $supplier_product Supplier product data
+     * @param array $internal_product Internal product data
+     * @return array Detailed score breakdown
+     */
+    private static function calculate_enhanced_match_score($supplier_product, $internal_product) {
+        $score_components = array(
+            'brand' => 0,
+            'series' => 0,
+            'vitola' => 0,
+            'dimensions' => 0,
+            'year' => 0,
+            'count' => 0,
+            'special_edition' => 0,
+            'regional' => 0,
+            'packaging' => 0,
+            'keywords' => 0,
+            'matched_terms' => array(),
+            'categorized_matches' => array()
+        );
+        
+        // Brand matching - highest priority with strict matching
+        if (!empty($supplier_product['brand']) && !empty($internal_product['brand'])) {
+            if (strtolower($supplier_product['brand']) === strtolower($internal_product['brand']) ||
+                self::are_brands_equivalent($supplier_product['brand'], $internal_product['brand'])) {
+                $score_components['brand'] = KT_CIGAR_WEIGHT_BRAND;
+                $score_components['matched_terms'][] = $internal_product['brand'];
+                $score_components['categorized_matches']['brand'] = array($internal_product['brand']);
+            }
+        }
+        
+        // Series/Model matching
+        if (!empty($supplier_product['series']) && !empty($internal_product['series'])) {
+            if (self::compare_series($supplier_product['series'], $internal_product['series'])) {
+                $score_components['series'] = KT_CIGAR_WEIGHT_MODEL;
+                $score_components['matched_terms'][] = $internal_product['series'];
+                $score_components['categorized_matches']['series'] = array($internal_product['series']);
+            }
+        }
+        
+        // Vitola matching
+        if (!empty($supplier_product['vitola']) && !empty($internal_product['vitola'])) {
+            if (self::compare_vitola($supplier_product['vitola'], $internal_product['vitola'])) {
+                $score_components['vitola'] = KT_CIGAR_WEIGHT_VITOLA;
+                $score_components['matched_terms'][] = $internal_product['vitola'];
+                $score_components['categorized_matches']['vitola'] = array($internal_product['vitola']);
+            }
+        }
+        
+        // Dimension matching
+        if (!empty($supplier_product['dimensions']['format']) && !empty($internal_product['dimensions']['format'])) {
+            $dimension_score = KT_Cigar_Mappings::compare_dimensions(
+                $supplier_product['dimensions'],
+                $internal_product['dimensions']
+            );
+            $score_components['dimensions'] = $dimension_score * KT_CIGAR_WEIGHT_DIMENSION;
+            if ($dimension_score > 0.8) {
+                $score_components['matched_terms'][] = $internal_product['dimensions']['format'];
+                $score_components['categorized_matches']['dimensions'] = array($internal_product['dimensions']['format']);
+            }
+        }
+        
+        // Year matching
+        if (!empty($supplier_product['year']) && !empty($internal_product['year'])) {
+            if ($supplier_product['year'] === $internal_product['year']) {
+                $score_components['year'] = KT_CIGAR_WEIGHT_YEAR;
+                $score_components['matched_terms'][] = $internal_product['year'];
+                $score_components['categorized_matches']['year'] = array($internal_product['year']);
+            }
+        }
+        
+        // Count matching
+        if (!empty($supplier_product['count']) && !empty($internal_product['count'])) {
+            if ($supplier_product['count'] == $internal_product['count']) {
+                $score_components['count'] = KT_CIGAR_WEIGHT_COUNT;
+                $score_components['matched_terms'][] = $internal_product['count'] . ' Count';
+                $score_components['categorized_matches']['count'] = array($internal_product['count']);
+            }
+        }
+        
+        // Special edition matching
+        $edition_matches = self::compare_editions($supplier_product['edition_types'], $internal_product['edition_types']);
+        if (!empty($edition_matches)) {
+            $score_components['special_edition'] = count($edition_matches) * KT_CIGAR_WEIGHT_SPECIAL_EDITION / 2;
+            $score_components['matched_terms'] = array_merge($score_components['matched_terms'], $edition_matches);
+            $score_components['categorized_matches']['special_edition'] = $edition_matches;
+        }
+        
+        // Regional matching
+        if (!empty($supplier_product['regional']) && !empty($internal_product['regional'])) {
+            if ($supplier_product['regional'] === $internal_product['regional']) {
+                $score_components['regional'] = KT_CIGAR_WEIGHT_REGIONAL;
+                $score_components['matched_terms'][] = $internal_product['regional'];
+                $score_components['categorized_matches']['regional'] = array($internal_product['regional']);
+            }
+        }
+        
+        // Packaging matching
+        if (!empty($supplier_product['packaging']) && !empty($internal_product['packaging'])) {
+            if (self::compare_packaging($supplier_product['packaging'], $internal_product['packaging'])) {
+                $score_components['packaging'] = KT_CIGAR_WEIGHT_PACKAGING;
+                $score_components['matched_terms'][] = $internal_product['packaging'];
+                $score_components['categorized_matches']['packaging'] = array($internal_product['packaging']);
+            }
+        }
+        
+        // Enhanced keyword matching with category-based weighting
+        $keyword_score = self::calculate_categorized_keyword_score(
+            $supplier_product['categorized_keywords'],
+            $internal_product['categorized_keywords'],
+            $score_components
+        );
+        $score_components['keywords'] = $keyword_score;
+        
+        return $score_components;
+    }
+    
+    /**
+     * Calculate keyword score based on categorized keywords
+     * 
+     * @param array $supplier_categories Supplier categorized keywords
+     * @param array $internal_categories Internal categorized keywords
+     * @param array $score_components Current score components
+     * @return float Keyword score
+     */
+    private static function calculate_categorized_keyword_score($supplier_categories, $internal_categories, &$score_components) {
+        $total_score = 0;
+        $category_weights = array(
+            'brand' => 0.35,
+            'series' => 0.25,
+            'vitola' => 0.20,
+            'special_edition' => 0.10,
+            'year' => 0.05,
+            'packaging' => 0.05
+        );
+        
+        foreach ($category_weights as $category => $weight) {
+            $supplier_keywords = isset($supplier_categories[$category]) ? $supplier_categories[$category] : array();
+            $internal_keywords = isset($internal_categories[$category]) ? $internal_categories[$category] : array();
+            
+            if (empty($supplier_keywords) || empty($internal_keywords)) {
+                continue;
+            }
+            
+            // Calculate matches in this category
+            $matches = array_intersect(
+                array_map('strtolower', $supplier_keywords),
+                array_map('strtolower', $internal_keywords)
+            );
+            
+            if (!empty($matches)) {
+                $match_ratio = count($matches) / max(count($supplier_keywords), count($internal_keywords));
+                $category_score = $match_ratio * $weight * KT_CIGAR_WEIGHT_KEYWORDS;
+                $total_score += $category_score;
+                
+                // Add to categorized matches
+                if (!isset($score_components['categorized_matches'][$category])) {
+                    $score_components['categorized_matches'][$category] = array();
+                }
+                $score_components['categorized_matches'][$category] = array_merge(
+                    $score_components['categorized_matches'][$category],
+                    array_values($matches)
+                );
+            }
+        }
+        
+        return $total_score;
+    }
+    
+    /**
+     * Calculate total score from score components
+     * 
+     * @param array $score_components Score breakdown
+     * @return float Total score (0-100)
+     */
+    private static function calculate_total_score($score_components) {
+        $total = 0;
+        
+        // Sum all component scores
+        foreach ($score_components as $component => $score) {
+            if (is_numeric($score)) {
+                $total += $score;
+            }
+        }
+        
+        // Normalize to 0-100 scale
+        return min(100, $total);
+    }
+    
+    /**
+     * Determine match type based on score components
+     * 
+     * @param array $score_components Score breakdown
+     * @return string Match type
+     */
+    private static function determine_match_type($score_components) {
+        // Exact match - brand, series, vitola all match perfectly
+        if ($score_components['brand'] == KT_CIGAR_WEIGHT_BRAND &&
+            $score_components['series'] == KT_CIGAR_WEIGHT_MODEL &&
+            $score_components['vitola'] == KT_CIGAR_WEIGHT_VITOLA) {
+            return self::MATCH_EXACT;
+        }
+        
+        // Dimension match - high dimension score
+        if ($score_components['dimensions'] >= KT_CIGAR_WEIGHT_DIMENSION * 0.8) {
+            return self::MATCH_DIMENSION;
+        }
+        
+        // Brand match - brand matches with other components
+        if ($score_components['brand'] == KT_CIGAR_WEIGHT_BRAND) {
+            return self::MATCH_BRAND;
+        }
+        
+        // Partial match
+        return self::MATCH_PARTIAL;
+    }
+    
+    /**
+     * Check if two brands are equivalent
+     * 
+     * @param string $brand1 First brand
+     * @param string $brand2 Second brand
+     * @return bool True if brands are equivalent
+     */
+    private static function are_brands_equivalent($brand1, $brand2) {
+        // Initialize brand mapping cache
+        KT_Cigar_Mappings::initialize_caches();
+        
+        $brand1_lower = strtolower($brand1);
+        $brand2_lower = strtolower($brand2);
+        
+        // Direct match
+        if ($brand1_lower === $brand2_lower) {
+            return true;
+        }
+        
+        // Check using pre-indexed brand mappings
+        $brand_mapping_cache = KT_Cigar_Mappings::$brand_mapping_cache;
+        
+        $brand1_primary = isset($brand_mapping_cache[$brand1_lower]) ? 
+                          $brand_mapping_cache[$brand1_lower] : $brand1_lower;
+        $brand2_primary = isset($brand_mapping_cache[$brand2_lower]) ? 
+                          $brand_mapping_cache[$brand2_lower] : $brand2_lower;
+        
+        return $brand1_primary === $brand2_primary;
+    }
+    
+    /**
+     * Compare series names with fuzzy matching
+     * 
+     * @param string $series1 First series
+     * @param string $series2 Second series
+     * @return bool True if series match
+     */
+    private static function compare_series($series1, $series2) {
+        if (empty($series1) || empty($series2)) {
+            return false;
+        }
+        
+        $series1_lower = strtolower($series1);
+        $series2_lower = strtolower($series2);
+        
+        // Direct match
+        if ($series1_lower === $series2_lower) {
+            return true;
+        }
+        
+        // Normalize series names
+        $series1_normalized = self::normalize_series_name($series1);
+        $series2_normalized = self::normalize_series_name($series2);
+        
+        if ($series1_normalized === $series2_normalized) {
+            return true;
+        }
+        
+        // Check for common variations
+        $variations = array(
+            'no.' => array('no ', 'number ', '#'),
+            'serie' => array('series', 'línea', 'linea', '系列'),
+            'edicion' => array('edition', 'ed.', 'ed ', '版'),
+            'especial' => array('special', 'esp.', 'esp ', '特别'),
+            'limitada' => array('limited', 'ltd.', 'ltd ', '限量'),
+            'reserva' => array('reserve', 'rsv.', 'rsv ', '珍藏'),
+            'vintage' => array('vint.', 'vint ', '年份', '老年')
+        );
+        
+        foreach ($variations as $key => $variants) {
+            foreach ($variants as $variant) {
+                $series1_test = str_replace($variant, $key, $series1_lower);
+                $series2_test = str_replace($variant, $key, $series2_lower);
+                
+                if ($series1_test === $series2_test) {
+                    return true;
+                }
+            }
+        }
+        
+        // Calculate similarity
+        $similarity = similar_text($series1_normalized, $series2_normalized, $percent);
+        return $percent >= 80;
+    }
+    
+    /**
+     * Compare vitola names
+     * 
+     * @param string $vitola1 First vitola
+     * @param string $vitola2 Second vitola
+     * @return bool True if vitolas match
+     */
+    private static function compare_vitola($vitola1, $vitola2) {
+        if (empty($vitola1) || empty($vitola2)) {
+            return false;
+        }
+        
+        $vitola1_lower = strtolower($vitola1);
+        $vitola2_lower = strtolower($vitola2);
+        
+        // Direct match
+        if ($vitola1_lower === $vitola2_lower) {
+            return true;
+        }
+        
+        // Use vitola mappings
+        $size_mappings = KT_Cigar_Mappings::get_size_mappings();
+        
+        // Find primary vitola names
+        $vitola1_primary = null;
+        $vitola2_primary = null;
+        
+        foreach ($size_mappings as $primary => $variants) {
+            if (in_array($vitola1_lower, array_map('strtolower', $variants))) {
+                $vitola1_primary = $primary;
+            }
+            if (in_array($vitola2_lower, array_map('strtolower', $variants))) {
+                $vitola2_primary = $primary;
+            }
+        }
+        
+        // If both map to the same primary, they match
+        if ($vitola1_primary && $vitola2_primary && $vitola1_primary === $vitola2_primary) {
+            return true;
+        }
+        
+        // Check if one is a variant of the other
+        if ($vitola1_primary === $vitola2_lower || $vitola2_primary === $vitola1_lower) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Compare editions
+     * 
+     * @param array $editions1 First edition types
+     * @param array $editions2 Second edition types
+     * @return array Matching editions
+     */
+    private static function compare_editions($editions1, $editions2) {
+        if (empty($editions1) || empty($editions2)) {
+            return array();
+        }
+        
+        $matches = array();
+        
+        foreach ($editions1 as $type1 => $value1) {
+            if (isset($editions2[$type1])) {
+                if ($value1 === $editions2[$type1]) {
+                    $matches[] = $value1;
+                }
+            }
+        }
+        
+        return $matches;
+    }
+    
+    /**
+     * Compare packaging
+     * 
+     * @param string $packaging1 First packaging
+     * @param string $packaging2 Second packaging
+     * @return bool True if packaging matches
+     */
+    private static function compare_packaging($packaging1, $packaging2) {
+        if (empty($packaging1) || empty($packaging2)) {
+            return false;
+        }
+        
+        $packaging1_lower = strtolower($packaging1);
+        $packaging2_lower = strtolower($packaging2);
+        
+        // Direct match
+        if ($packaging1_lower === $packaging2_lower) {
+            return true;
+        }
+        
+        // Extract counts if present
+        $count1 = self::extract_count($packaging1);
+        $count2 = self::extract_count($packaging2);
+        
+        if ($count1 && $count2 && $count1 === $count2) {
+            return true;
+        }
+        
+        // Check for common packaging types
+        $packaging_types = array('box', 'tube', 'cabinet', 'bundle', 'pack', '盒', '管', '包', '装');
+        
+        foreach ($packaging_types as $type) {
+            if (mb_stripos($packaging1_lower, $type) !== false && 
+                mb_stripos($packaging2_lower, $type) !== false) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Categorize keywords into specific categories
+     * 
+     * @param array $keywords Keywords to categorize
+     * @return array Categorized keywords
+     */
+    public static function categorize_keywords($keywords) {
+        $categories = array(
+            'brand' => array(),
+            'series' => array(),
+            'vitola' => array(),
+            'special_edition' => array(),
+            'year' => array(),
+            'count' => array(),
+            'packaging' => array(),
+            'regional' => array(),
+            'dimension' => array(),
+            'misc' => array()
+        );
+        
+        // Initialize caches
+        KT_Cigar_Mappings::initialize_caches();
+        
+        // Get mappings
+        $keyword_cache = KT_Cigar_Mappings::$keyword_cache;
+        $brand_mapping_cache = KT_Cigar_Mappings::$brand_mapping_cache;
+        
+        foreach ($keywords as $keyword) {
+            $keyword_lower = strtolower($keyword);
+            $categorized = false;
+            
+            // Check pre-indexed keyword cache
+            if (isset($keyword_cache[$keyword_lower])) {
+                $cache_entry = $keyword_cache[$keyword_lower];
+                $categories[$cache_entry['type']][] = $keyword;
+                $categorized = true;
+            }
+            
+            // Check brand mapping cache
+            if (!$categorized && isset($brand_mapping_cache[$keyword_lower])) {
+                $categories['brand'][] = $keyword;
+                $categorized = true;
+            }
+            
+            // Check for year patterns
+            if (!$categorized && preg_match('/\b(19|20)\d{2}\b/', $keyword)) {
+                $categories['year'][] = $keyword;
+                $categorized = true;
+            }
+            
+            // Check for count patterns
+            if (!$categorized && preg_match('/^\d+[-\s]?(?:count|pack|支|装)$/i', $keyword)) {
+                $categories['count'][] = $keyword;
+                $categorized = true;
+            }
+            
+            // Check for dimension patterns
+            if (!$categorized && preg_match('/^\d+[\/x]\d+$/', $keyword)) {
+                $categories['dimension'][] = $keyword;
+                $categorized = true;
+            }
+            
+            // Default to misc
+            if (!$categorized) {
+                $categories['misc'][] = $keyword;
+            }
+        }
+        
+        // Remove empty categories
+        foreach ($categories as $category => $keywords) {
+            if (empty($keywords)) {
+                unset($categories[$category]);
+            }
+        }
+        
+        return $categories;
+    }
+    
+    /**
+     * Detect product type from title
+     * 
+     * @param string $title Product title
+     * @return string Detected product type
+     */
+    public static function detect_product_type($title) {
+        $title_lower = mb_strtolower($title);
+        
+        // Humidor detection patterns
+        $humidor_patterns = array(
+            '保湿盒', '保湿箱', '雪茄盒', '雪茄箱', '恒湿盒', '恒温恒湿', 
+           'humidor', 'humidifier', 'cigar box', 'travel case',
+           '旅行盒', '便携盒', '桌面盒', '雪茄柜'
+       );
+       
+       foreach ($humidor_patterns as $pattern) {
+           if (mb_stripos($title_lower, $pattern) !== false) {
+               return self::TYPE_HUMIDOR;
+           }
+       }
+       
+       // Cigarette detection patterns
+       $cigarette_patterns = array(
+           '香烟', '烟', '万宝路', '中华', '黄鹤楼', '利群', '玉溪',
+           'cigarette', 'marlboro', 'camel', 'winston', 'kent'
+       );
+       
+       foreach ($cigarette_patterns as $pattern) {
+           if (mb_stripos($title_lower, $pattern) !== false && 
+               mb_stripos($title_lower, '雪茄') === false) {
+               return self::TYPE_CIGARETTE;
+           }
+       }
+       
+       // Pipe tobacco detection
+       $pipe_patterns = array(
+           '烟斗', '烟丝', '斗烟', 'pipe tobacco', 'pipe', 'tobacco'
+       );
+       
+       foreach ($pipe_patterns as $pattern) {
+           if (mb_stripos($title_lower, $pattern) !== false) {
+               return self::TYPE_PIPE_TOBACCO;
+           }
+       }
+       
+       // Accessory detection
+       $accessory_patterns = array(
+           '打火机', '剪刀', '烟灰缸', '雪茄剪', '雪茄钻', '烟嘴',
+           'lighter', 'cutter', 'ashtray', 'punch', 'guillotine',
+           '配件', 'accessory', '工具', 'tool'
+       );
+       
+       foreach ($accessory_patterns as $pattern) {
+           if (mb_stripos($title_lower, $pattern) !== false) {
+               return self::TYPE_ACCESSORY;
+           }
+       }
+       
+       // Default to cigar
+       return self::TYPE_CIGAR;
+   }
+   
+   /**
+    * Clean product title
+    * 
+    * @param string $title Original title
+    * @return string Cleaned title
+    */
+   private static function clean_title($title) {
+       // Remove extra whitespace
+       $title = preg_replace('/\s+/', ' ', $title);
+       
+       // Remove special characters but keep important ones
+       $title = preg_replace('/[^\p{L}\p{N}\s\-\.\(\)\[\]\/\#\&\'\"]+/u', ' ', $title);
+       
+       // Remove multiple spaces again
+       $title = preg_replace('/\s+/', ' ', $title);
+       
+       return trim($title);
+   }
+   
+   /**
+    * Extract keywords from title with enhanced extraction
+    * 
+    * @param string $title Title to extract from
+    * @return array Extracted keywords
+    */
+   public static function extract_keywords($title) {
+       $keywords = array();
+       
+       // Extract alphanumeric segments
+       preg_match_all('/[\p{L}\p{N}]+/u', $title, $matches);
+       
+       if (!empty($matches[0])) {
+           foreach ($matches[0] as $match) {
+               // Skip common filter words
+               if (!in_array(mb_strtolower($match), KT_Cigar_Mappings::$common_filter_words)) {
+                   $keywords[] = $match;
+               }
+           }
+       }
+       
+       // Extract dimension patterns
+       preg_match_all('/\d+[\s]*[xX×\*\/\\\\]\s*\d+/', $title, $dimension_matches);
+       if (!empty($dimension_matches[0])) {
+           $keywords = array_merge($keywords, $dimension_matches[0]);
+       }
+       
+       // Extract year patterns
+       preg_match_all('/\b(19|20)\d{2}\b/', $title, $year_matches);
+       if (!empty($year_matches[0])) {
+           $keywords = array_merge($keywords, $year_matches[0]);
+       }
+       
+       // Extract count patterns
+       preg_match_all('/\d+\s*(?:支|pack|count|pc|pcs)/i', $title, $count_matches);
+       if (!empty($count_matches[0])) {
+           $keywords = array_merge($keywords, $count_matches[0]);
+       }
+       
+       // Extract special edition terms
+       $special_mappings = KT_Cigar_Mappings::get_special_mappings();
+       foreach ($special_mappings['special_editions'] as $chinese => $english) {
+           if (mb_stripos($title, $chinese) !== false) {
+               $keywords[] = $chinese;
+           }
+       }
+       
+       // Extract wrapped phrases (in parentheses or brackets)
+       preg_match_all('/[\(\[]([^\)\]]+)[\)\]]/', $title, $wrapped_matches);
+       if (!empty($wrapped_matches[1])) {
+           foreach ($wrapped_matches[1] as $wrapped) {
+               $wrapped_keywords = self::extract_keywords($wrapped);
+               $keywords = array_merge($keywords, $wrapped_keywords);
+           }
+       }
+       
+       // Remove duplicates
+       $keywords = array_unique($keywords);
+       
+       return array_values($keywords);
+   }
+   
+   /**
+    * Extract brand from title with enhanced detection
+    * 
+    * @param string $title Title to extract from
+    * @return string|null Extracted brand
+    */
+   public static function extract_brand($title) {
+       // Initialize caches
+       KT_Cigar_Mappings::initialize_caches();
+       
+       $title_lower = mb_strtolower($title);
+       
+       // Get all brand mappings
+       $cuban_brands = KT_Cigar_Mappings::get_cuban_brand_mappings();
+       $non_cuban_brands = KT_Cigar_Mappings::get_non_cuban_brand_mappings();
+       $all_brands = array_merge($cuban_brands, $non_cuban_brands);
+       
+       // Check for exact matches first
+       foreach ($all_brands as $primary => $variants) {
+           // Check primary brand name
+           if (mb_stripos($title_lower, $primary) !== false) {
+               return ucwords($primary);
+           }
+           
+           // Check all variants
+           foreach ($variants as $variant) {
+               if (mb_stripos($title_lower, mb_strtolower($variant)) !== false) {
+                   return ucwords($primary);
+               }
+           }
+       }
+       
+       // Try word boundaries for better accuracy
+       $words = preg_split('/[\s\-\.]+/', $title_lower);
+       
+       foreach ($all_brands as $primary => $variants) {
+           if (in_array($primary, $words)) {
+               return ucwords($primary);
+           }
+           
+           foreach ($variants as $variant) {
+               if (in_array(mb_strtolower($variant), $words)) {
+                   return ucwords($primary);
+               }
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract series from title
+    * 
+    * @param string $title Title to extract from
+    * @return string|null Extracted series
+    */
+   public static function extract_series($title) {
+       $special_mappings = KT_Cigar_Mappings::get_special_mappings();
+       
+       // Apply model patterns
+       foreach ($special_mappings['model_patterns'] as $pattern => $replacement) {
+           if (preg_match('#' . $pattern . '#iu', $title, $matches)) {
+               // Handle replacement with captured groups
+               $series = $replacement;
+               for ($i = 1; $i < count($matches); $i++) {
+                   $series = str_replace('$' . $i, $matches[$i], $series);
+               }
+               return $series;
+           }
+       }
+       
+       // Look for common series patterns
+       $series_patterns = array(
+           '#Serie\s*([A-Z])\s*No\.?\s*(\d+)#i' => 'Serie $1 No.$2',
+           '#No\.?\s*(\d+)#i' => 'No.$1',
+           '#Siglo\s*([IVX]+)#i' => 'Siglo $1',
+           '#BHK\s*(\d+)#i' => 'Behike $1',
+           '#(\d+)(?:th)?\s*Anniversary#i' => '$1th Anniversary',
+           '#(\d{4})\s*(?:Limited\s*Edition|LE)#i' => '$1 Limited Edition'
+       );
+       
+       foreach ($series_patterns as $pattern => $replacement) {
+           if (preg_match($pattern, $title, $matches)) {
+               $series = $replacement;
+               for ($i = 1; $i < count($matches); $i++) {
+                   $series = str_replace('$' . $i, $matches[$i], $series);
+               }
+               return $series;
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract vitola from title and dimensions
+    * 
+    * @param string $title Title to extract from
+    * @param string $dimensions Dimensions string
+    * @return string|null Extracted vitola
+    */
+   public static function extract_vitola($title, $dimensions = '') {
+       $title_lower = mb_strtolower($title);
+       $size_mappings = KT_Cigar_Mappings::get_size_mappings();
+       
+       // Check title for vitola names
+       foreach ($size_mappings as $english => $chinese_terms) {
+           // Check English name
+           if (mb_stripos($title_lower, strtolower($english)) !== false) {
+               return $english;
+           }
+           
+           // Check Chinese variants
+           foreach ($chinese_terms as $chinese) {
+               if (mb_stripos($title_lower, mb_strtolower($chinese)) !== false) {
+                   return $english;
+               }
+           }
+       }
+       
+       // If no vitola found in title, check dimensions
+       if (!empty($dimensions)) {
+           $special_mappings = KT_Cigar_Mappings::get_special_mappings();
+           $dimension_patterns = $special_mappings['dimension_patterns'];
+           
+           // Format dimensions for matching
+           $formatted_dimensions = preg_replace('/\s+/', '', $dimensions);
+           
+           foreach ($dimension_patterns as $pattern => $vitola) {
+               if (preg_match('#^' . $pattern . '$#', $formatted_dimensions)) {
+                   return $vitola;
+               }
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract count from title
+    * 
+    * @param string $title Title to extract from
+    * @return int|null Extracted count
+    */
+   public static function extract_count($title) {
+       // Look for count patterns
+       $count_patterns = array(
+           '#(\d+)\s*(?:支|pack|count|pc|pcs|stick)#i',
+           '#(\d+)\s*支装#',
+           '#(\d+)支\s*(?:\(|（)#',
+           '#box\s*of\s*(\d+)#i',
+           '#pack\s*of\s*(\d+)#i'
+       );
+       
+       foreach ($count_patterns as $pattern) {
+           if (preg_match($pattern, $title, $matches)) {
+               return intval($matches[1]);
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract model number
+    * 
+    * @param string $title Title to extract from
+    * @return string|null Extracted model number
+    */
+   private static function extract_model_number($title) {
+       // Look for specific model patterns
+       $model_patterns = array(
+           '#No\.?\s*(\d+)#i',
+           '##\s*(\d+)#',
+           '#(\d+)(?:号|號)#',
+           '#[A-Z]\s*(\d+)#',
+           '#(\d+)\s*[A-Z]#'
+       );
+       
+       foreach ($model_patterns as $pattern) {
+           if (preg_match($pattern, $title, $matches)) {
+               return $matches[1];
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract packaging information
+    * 
+    * @param string $title Title to extract from
+    * @return string|null Extracted packaging
+    */
+   private static function extract_packaging($title) {
+       $special_mappings = KT_Cigar_Mappings::get_special_mappings();
+       $packaging_terms = $special_mappings['packaging'];
+       
+       foreach ($packaging_terms as $pattern => $english) {
+           if (is_string($pattern) && mb_stripos($title, $pattern) !== false) {
+               return $english;
+           }
+           // Handle regex patterns
+           elseif (preg_match('#' . $pattern . '#iu', $title, $matches)) {
+               $packaging = $english;
+               for ($i = 1; $i < count($matches); $i++) {
+                   $packaging = str_replace('$' . $i, $matches[$i], $packaging);
+               }
+               return $packaging;
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Extract regional information
+    * 
+    * @param string $title Title to extract from  
+    * @return string|null Extracted regional info
+    */
+   private static function extract_regional($title) {
+       $special_mappings = KT_Cigar_Mappings::get_special_mappings();
+       $regional_patterns = $special_mappings['regional_patterns'];
+       
+       foreach ($regional_patterns as $pattern => $region) {
+           if (preg_match('#' . $pattern . '#iu', $title)) {
+               return $region;
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Normalize series name for comparison
+    * 
+    * @param string $series Series name
+    * @return string Normalized series
+    */
+   private static function normalize_series_name($series) {
+       $series = mb_strtolower($series);
+       
+       // Remove common prefixes/suffixes
+       $series = preg_replace('/^(serie|series|línea|linea)\s+/i', '', $series);
+       $series = preg_replace('/\s+(serie|series|línea|linea)$/i', '', $series);
+       
+       // Normalize spaces and special characters
+       $series = preg_replace('/\s+/', ' ', $series);
+       $series = preg_replace('/[^\p{L}\p{N}\s]/u', '', $series);
+       
+       return trim($series);
+   }
+}
+
+// Initialize debug if needed
+if (isset($_GET['debug']) || (defined('WP_DEBUG') && WP_DEBUG)) {
+   KT_Cigar_Debug::init('', 3);
+   define('KT_DEBUG_INITIALIZED', true);
+}
+
+// Log initial load
+if (defined('KT_DEBUG_INITIALIZED')) {
+   KT_Cigar_Debug::log("KT Cigar Matcher v5.0.0 loaded successfully", 2);
+}
