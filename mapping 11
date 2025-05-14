@@ -1,0 +1,3334 @@
+/**
+ * KT_Cigar_Mappings Class
+ * Advanced cigar product mapping and matching system
+ * Combines all successful techniques from mapping_06, mapping_07, mapping_08, mapping_09
+ * With added intelligent pattern recognition and flexible translation handling
+ */
+class KT_Cigar_Mappings {
+    // Database of cigar brands, series, and variations for accurate matching
+    private $cigar_brands = [];
+    private $cigar_series = [];
+    private $dimension_patterns = [];
+    private $packaging_patterns = [];
+    private $special_editions = [];
+    private $regional_editions = [];
+    private $limited_editions = [];
+    private $brand_aliases = [];
+    private $series_aliases = [];
+    private $translation_mapping = [];
+    private $ignored_terms = [];
+    private $dimension_regex = '';
+    private $box_regex = '';
+    private $debug = false;
+    private $initialized = false;
+
+    // Cache for optimization
+    private $brand_cache = [];
+    private $series_cache = [];
+    private $keywords_cache = [];
+    private $translation_cache = [];
+    private $normalized_cache = [];
+
+    /**
+     * Constructor - initialize data structures
+     */
+    public function __construct($debug = false) {
+        $this->debug = $debug;
+        $this->initialize_mappings();
+    }
+
+    /**
+     * Initialize all mapping data structures
+     */
+    public function initialize_mappings() {
+        if ($this->initialized) {
+            return;
+        }
+
+        // Set up dimension pattern regex
+        $this->dimension_regex = '/\b(\d{2,3})\s*[xX×]\s*(\d{1,2})(\.\d+)?(?:\s*[xX×]\s*(\d{1,2})(\.\d+)?)?\b|\b(\d{2,3})(?:mm)?\s*\(*(?:length|long|Ring|RG|gauge|diameter)?:?\s*(\d{1,2})(?:mm)?\)*\b|\b(\d{2,3})\s*(?:mm)?\s*(?:by|×|x)\s*(\d{1,2})(?:mm)?\b/i';
+        
+        // Set up box pattern regex
+        $this->box_regex = '/\b(?:(?:box(?:\s+of)?|pack(?:ing)?(?:\s+of)?|cabinet(?:\s+of)?|jar(?:\s+of)?|bundle(?:\s+of)?|pack(?:et)?(?:\s+of)?|tin(?:\s+of)?|case(?:\s+of)?|crate(?:\s+of)?|carton(?:\s+of)?)\s+(?:x\s*)?(\d{1,3})(?:\s+(?:cigars?|ct|count|pieces?|sticks?|units?))?|(\d{1,3})(?:\s*(?:cigars?|ct|count|pieces?|sticks?|units?|box|pack|tin|bundle|jar|cabinet)))\b/i';
+
+        // Initialize brand database with common cigar brands and their Chinese translations
+        $this->cigar_brands = [
+            // Cuban brands
+            'cohiba' => ['柯伊巴', '高希霸', '哥希巴', '科伊巴', '科希巴', 'cohiba'],
+            'montecristo' => ['蒙特克里斯托', '蒙特', '蒙特克里图', '蒙特克里斯多', '蒙德克里', 'montecristo', 'monte', 'mc'],
+            'romeo y julieta' => ['罗密欧朱丽叶', '罗密欧', '罗密欧与朱丽叶', '罗密欧和朱丽叶', '罗密欧朱丽叶特', 'romeo y julieta', 'ryj', 'romeo', 'julieta'],
+            'partagas' => ['帕特加斯', '百德加斯', '帕塔加斯', '巴塔加斯', '帕特加', 'partagas'],
+            'hoyo de monterrey' => ['霍约德蒙特雷', '蒙特雷', '何塞蒙特雷', '何友蒙特雷', '霍约·德·蒙特雷伊', 'hoyo', 'hdm', 'hoyo de monterrey'],
+            'h. upmann' => ['亨利乌普曼', '乌普曼', '乌普曼', 'h. upmann', 'h upmann', 'upmann', 'h.upmann'],
+            'bolivar' => ['玻利瓦尔', '玻利瓦', '博利瓦', '玻利华', 'bolivar'],
+            'punch' => ['潘趣', '潘趣', '朋驰', 'punch'],
+            'ramon allones' => ['雷蒙艾罗尼', '雷蒙', '雷蒙艾利尼', 'ramon allones', 'ra'],
+            'trinidad' => ['特立尼达', '特立尼达', '特多里尼达', 'trinidad'],
+            'el rey del mundo' => ['雷恩', '雷恩德尔曼多', '世界之王', 'el rey del mundo', 'erdm'],
+            'san cristobal de la habana' => ['圣克里斯托瓦尔', '圣克里斯托巴尔', '圣克里斯托', 'san cristobal', 'san cristobal de la habana', 'scdlh'],
+            'quai dorsay' => ['码头', '奥赛码头', '多尔赛码头', '多赛码头', 'quai dorsay', 'quai d\'orsay', 'quai d orsay'],
+            'la gloria cubana' => ['古巴荣耀', '拉格洛丽亚古巴纳', '拉哥利亚', 'la gloria cubana', 'lgc'],
+            'jose l. piedra' => ['何塞皮埃德拉', '荷塞', '皮埃德拉', 'jose l. piedra', 'jose l piedra', 'jose piedra', 'jlp'],
+            'fonseca' => ['丰塞卡', '丰赛卡', 'fonseca'],
+            'juan lopez' => ['胡安洛佩兹', '胡安·洛佩兹', '胡安罗佩斯', 'juan lopez', 'jl'],
+            'sancho panza' => ['桑乔潘莎', '桑丘潘莎', 'sancho panza', 'sp'],
+            'rafael gonzalez' => ['拉斐尔冈萨雷斯', '拉斐尔', '拉斐尔·冈萨雷斯', 'rafael gonzalez', 'rg'],
+            'por larranaga' => ['保拉纳加', '拉腊纳加', 'por larranaga', 'pl'],
+            'diplomáticos' => ['外交官', '迪普洛马蒂克斯', 'diplomáticos', 'diplomaticos', 'diplo'],
+            'la flor de cano' => ['卡诺之花', '卡诺花', 'la flor de cano', 'flor de cano', 'lfdc'],
+            'quintero' => ['昆特罗', 'quintero'],
+            'vegueros' => ['维格罗斯', '韦格罗斯', 'vegueros'],
+            'cuaba' => ['库阿巴', '古阿巴', '库夸巴', 'cuaba'],
+            
+            // Non-Cuban premium brands
+            'arturo fuente' => ['阿图罗富恩特', '富恩特', 'arturo fuente', 'fuente'],
+            'padron' => ['帕德龙', '帕德隆', '帕德伦', 'padron'],
+            'davidoff' => ['大卫杜夫', '大卫杜夫', '大卫·杜夫', 'davidoff'],
+            'my father' => ['我的父亲', 'my father', 'mf'],
+            'oliva' => ['奥利瓦', '奥利维亚', 'oliva'],
+            'drew estate' => ['德鲁庄园', '德鲁', 'drew estate', 'drew'],
+            'ashton' => ['阿什顿', 'ashton'],
+            'la aroma de cuba' => ['古巴的香气', '古巴香气', 'la aroma de cuba', 'ladc'],
+            'perdomo' => ['佩尔多莫', '珀多莫', 'perdomo'],
+            'rocky patel' => ['洛基帕特尔', '洛基·帕特尔', 'rocky patel', 'rp'],
+            'la flor dominicana' => ['多米尼加之花', '多米尼加娜', 'la flor dominicana', 'lfd'],
+            'aging room' => ['陈年室', '陈化室', 'aging room'],
+            'alec bradley' => ['亚历克布拉德利', '亚历克·布拉德利', 'alec bradley', 'ab'],
+            'camacho' => ['卡马乔', 'camacho'],
+            'aj fernandez' => ['aj费尔南德斯', 'aj·费尔南德斯', 'aj fernandez'],
+            'crowned heads' => ['加冕之首', '皇冠头', 'crowned heads', 'ch'],
+            'illusione' => ['幻象', '伊露希恩', 'illusione'],
+            'joya de nicaragua' => ['尼加拉瓜的珠宝', '尼加拉瓜珠宝', 'joya de nicaragua', 'jdn'],
+            'plasencia' => ['普拉森西亚', 'plasencia'],
+            'foundation' => ['基础', '基金会', 'foundation'],
+            'caldwell' => ['考德威尔', 'caldwell'],
+            'warped' => ['沃普德', '变形', 'warped'],
+            'tatuaje' => ['纹身', '塔图哈', 'tatuaje'],
+            'liga privada' => ['私人联盟', '私人联赛', 'liga privada', 'liga'],
+            'opus x' => ['作品x', 'opus x'],
+            'casa fernandez' => ['费尔南德斯之家', 'casa fernandez'],
+            'new world' => ['新世界', 'new world'],
+            'nat sherman' => ['纳特舍曼', '纳特·舍曼', 'nat sherman'],
+            'macanudo' => ['马卡努多', 'macanudo'],
+            'montecristo (non-cuban)' => ['蒙特克里斯托(非古巴)', '蒙特克里斯托（非古巴）', 'montecristo nc', 'montecristo non-cuban'],
+            'romeo y julieta (non-cuban)' => ['罗密欧朱丽叶(非古巴)', '罗密欧朱丽叶（非古巴）', 'romeo y julieta nc', 'ryj nc'],
+            'partagas (non-cuban)' => ['帕特加斯(非古巴)', '帕特加斯（非古巴）', 'partagas nc'],
+            'hoyo de monterrey (non-cuban)' => ['霍约德蒙特雷(非古巴)', '霍约德蒙特雷（非古巴）', 'hoyo nc', 'hdm nc'],
+            'h. upmann (non-cuban)' => ['亨利乌普曼(非古巴)', '亨利乌普曼（非古巴）', 'h. upmann nc', 'upmann nc'],
+            'punch (non-cuban)' => ['潘趣(非古巴)', '潘趣（非古巴）', 'punch nc'],
+
+            // Additional brands
+            'san lotano' => ['圣洛塔诺', 'san lotano'],
+            'cohiba nicaragua' => ['柯伊巴尼加拉瓜', '高希霸尼加拉瓜', 'cohiba nicaragua'],
+            'cohiba dominican' => ['柯伊巴多米尼加', '高希霸多米尼加', 'cohiba dominican'],
+            'san cristobal (nc)' => ['圣克里斯托瓦尔(非古巴)', '圣克里斯托瓦尔（非古巴）', 'san cristobal nc'],
+            'herrera esteli' => ['埃雷拉埃斯特利', 'herrera esteli', 'he'],
+            'undercrown' => ['皇冠之下', '皇冠底下', 'undercrown'],
+            'cain' => ['该隐', '凯恩', 'cain'],
+            'don carlos' => ['唐卡洛斯', '唐·卡洛斯', 'don carlos'],
+            'hemingway' => ['海明威', 'hemingway'],
+            'fuente fuente' => ['富恩特富恩特', 'fuente fuente'],
+            'god of fire' => ['火神', 'god of fire', 'gof'],
+            'anejo' => ['安尼约', '陈年', 'anejo'],
+            'padron anniversary' => ['帕德龙周年', '帕德龙周年纪念', 'padron anniversary'],
+            'e.p. carrillo' => ['e.p.卡里略', 'e.p. carrillo', 'ep carrillo', 'epc'],
+            'la palina' => ['拉帕利纳', 'la palina'],
+            'leccia' => ['莱西亚', 'leccia'],
+            'cao' => ['卡奥', 'cao'],
+            'gurkha' => ['廓尔喀', '古尔卡', 'gurkha'],
+            'fratello' => ['弗拉特洛', '弗拉特罗', 'fratello'],
+            'mbombay' => ['孟买', 'mbombay'],
+            'roma craft' => ['罗马手工', 'roma craft'],
+            'serino' => ['塞里诺', 'serino'],
+            'dunbarton tobacco & trust' => ['登巴顿烟草与信托', 'dunbarton tobacco & trust', 'dunbarton', 'dtt'],
+            'curivari' => ['库里瓦里', 'curivari'],
+            'leaf by oscar' => ['奥斯卡之叶', 'leaf by oscar'],
+            'aganorsa leaf' => ['阿加诺萨叶', 'aganorsa leaf'],
+            'padrón' => ['帕德龙', 'padrón', 'padron'],
+            '7-20-4' => ['7-20-4', '7204'],
+            'cavalier' => ['骑士', 'cavalier'],
+            'crux' => ['十字架', 'crux'],
+            'eiroa' => ['埃罗亚', 'eiroa'],
+            'espinosa' => ['埃斯皮诺萨', 'espinosa'],
+            'hoyo la amistad' => ['霍约友谊', 'hoyo la amistad'],
+            'laranja' => ['拉兰加', 'laranja'],
+            'nestor miranda' => ['内斯特米兰达', '内斯特·米兰达', 'nestor miranda'],
+            'regius' => ['雷吉乌斯', 'regius'],
+            'room101' => ['101室', 'room101', 'room 101'],
+            'quesada' => ['奎萨达', 'quesada'],
+            'viaje' => ['维亚赫', '旅行', 'viaje'],
+            'zino' => ['齐诺', 'zino'],
+            'la aurora' => ['拉奥罗拉', 'la aurora'],
+            'cornelius & anthony' => ['科尼利厄斯与安东尼', 'cornelius & anthony', 'cornelius and anthony', 'c&a'],
+            'lx2' => ['lx2'],
+            'la historia' => ['历史', 'la historia'],
+            'flor del valle' => ['山谷之花', 'flor del valle'],
+            'todos las dias' => ['每一天', 'todos las dias', 'tld'],
+            'sin compromiso' => ['不妥协', 'sin compromiso'],
+            'sobremesa' => ['餐后', 'sobremesa'],
+            'the tabernacle' => ['帐幕', '圣殿', 'the tabernacle', 'tabernacle'],
+            'highclere castle' => ['海克利尔城堡', 'highclere castle'],
+            'the king is dead' => ['国王驾崩', 'the king is dead', 'tkid'],
+            'four kicks' => ['四踢', 'four kicks'],
+            'la imperiosa' => ['皇后', 'la imperiosa'],
+            'nicaragua' => ['尼加拉瓜', 'nicaragua'],
+            'dominican' => ['多米尼加', 'dominican'],
+            'connecticut' => ['康涅狄格', 'connecticut', 'ct'],
+            'honduras' => ['洪都拉斯', 'honduras'],
+            'brazil' => ['巴西', 'brazil'],
+            'ecuador' => ['厄瓜多尔', 'ecuador'],
+            'sumatra' => ['苏门答腊', 'sumatra'],
+            'maduro' => ['马杜罗', 'maduro'],
+            'habano' => ['哈巴诺', 'habano'],
+            'cameroon' => ['喀麦隆', 'cameroon'],
+            'corojo' => ['科罗霍', 'corojo'],
+            'criollo' => ['克里奥罗', 'criollo'],
+            'oscuro' => ['奥斯库罗', 'oscuro'],
+            'gordito' => ['戈尔迪托', 'gordito'],
+            'seleccion' => ['精选', 'seleccion'],
+            'reserva' => ['珍藏', 'reserva'],
+            'gran reserva' => ['特级珍藏', 'gran reserva'],
+        ];
+
+        // Initialize series database for major brands
+        $this->cigar_series = [
+            // Cohiba series
+            'cohiba' => [
+                'siglo' => ['世纪', '西格洛', 'siglo'],
+                'behike' => ['贝希克', '贝伊克', 'behike', 'bhk'],
+                'maduro' => ['马杜罗', 'maduro', 'maduro 5'],
+                'robusto' => ['罗布图', '罗布斯图', 'robusto'],
+                'esplendidos' => ['特长雪茄', '光辉', '辉煌', 'esplendidos'],
+                'lanceros' => ['兰塞罗', '长棒', 'lanceros'],
+                'piramides' => ['金字塔', 'piramides'],
+                'exquisitos' => ['精美', '精致', 'exquisitos'],
+                'panetelas' => ['小潘纳', 'panetelas'],
+                'coronas especiales' => ['特制皇冠', 'coronas especiales'],
+                'genios' => ['天才', 'genios'],
+                'secretos' => ['秘密', 'secretos'],
+                'magicos' => ['魔术师', 'magicos'],
+                'robustos' => ['罗布图', '健壮', 'robustos'],
+                'linea 1492' => ['1492系列', 'linea 1492'],
+                'linea clasica' => ['经典系列', 'linea clasica'],
+                'talismán' => ['护身符', 'talismán', 'talisman'],
+            ],
+            
+            // Montecristo series
+            'montecristo' => [
+                'no.1' => ['1号', '一号', 'no.1', 'no. 1', '#1', 'number 1'],
+                'no.2' => ['2号', '二号', 'no.2', 'no. 2', '#2', 'number 2'],
+                'no.3' => ['3号', '三号', 'no.3', 'no. 3', '#3', 'number 3'],
+                'no.4' => ['4号', '四号', 'no.4', 'no. 4', '#4', 'number 4'],
+                'no.5' => ['5号', '五号', 'no.5', 'no. 5', '#5', 'number 5'],
+                'petit edmundo' => ['小爱德蒙', '小蒙特', 'petit edmundo'],
+                'edmundo' => ['爱德蒙', '爱德蒙多', 'edmundo'],
+                'double edmundo' => ['双爱德蒙', '双爱德蒙多', 'double edmundo'],
+                'petit no.2' => ['小2号', '小二号', 'petit no.2', 'petit no. 2', 'petit #2'],
+                'junior' => ['少年', 'junior'],
+                'joyitas' => ['小宝石', 'joyitas'],
+                'especial' => ['特别', 'especial'],
+                'especial no.1' => ['特别1号', '特别一号', 'especial no.1', 'especial no. 1', 'especial #1'],
+                'especial no.2' => ['特别2号', '特别二号', 'especial no.2', 'especial no. 2', 'especial #2'],
+                'eagle' => ['鹰', 'eagle'],
+                'open eagle' => ['开放鹰', 'open eagle'],
+                'open master' => ['开放大师', 'open master'],
+                'open junior' => ['开放少年', 'open junior'],
+                'open regata' => ['开放赛艇', 'open regata'],
+                'dumas' => ['大仲马', 'dumas'],
+                'media corona' => ['半皇冠', 'media corona'],
+                'linea 1935' => ['1935系列', 'linea 1935'],
+                'maltes' => ['马尔他骑士', 'maltes'],
+                'leyenda' => ['传奇', 'leyenda'],
+                'dantes' => ['但丁', '但体', 'dantes'],
+            ],
+            
+            // Romeo y Julieta series
+            'romeo y julieta' => [
+                'churchill' => ['丘吉尔', 'churchill'],
+                'wide churchill' => ['宽丘吉尔', 'wide churchill'],
+                'short churchill' => ['短丘吉尔', 'short churchill'],
+                'petit churchill' => ['小丘吉尔', 'petit churchill'],
+                'belicoso' => ['鱼雷', 'belicoso'],
+                'belvedere' => ['美景宫', 'belvedere'],
+                'cazadores' => ['猎人', 'cazadores'],
+                'cedros de luxe' => ['豪华雪松', 'cedros de luxe'],
+                'cedros de luxe no.1' => ['豪华雪松1号', '豪华雪松一号', 'cedros de luxe no.1', 'cedros de luxe no. 1'],
+                'cedros de luxe no.2' => ['豪华雪松2号', '豪华雪松二号', 'cedros de luxe no.2', 'cedros de luxe no. 2'],
+                'cedros de luxe no.3' => ['豪华雪松3号', '豪华雪松三号', 'cedros de luxe no.3', 'cedros de luxe no. 3'],
+                'coronitas en cedro' => ['雪松皇冠', 'coronitas en cedro'],
+                'exhibition no.3' => ['展览3号', '展览三号', 'exhibition no.3', 'exhibition no. 3', 'exhibition #3'],
+                'exhibition no.4' => ['展览4号', '展览四号', 'exhibition no.4', 'exhibition no. 4', 'exhibition #4'],
+                'mille fleurs' => ['千花', 'mille fleurs'],
+                'no.1' => ['1号', '一号', 'no.1', 'no. 1', '#1', 'numero 1'],
+                'no.2' => ['2号', '二号', 'no.2', 'no. 2', '#2', 'numero 2'],
+                'no.3' => ['3号', '三号', 'no.3', 'no. 3', '#3', 'numero 3'],
+                'petit coronas' => ['小皇冠', 'petit coronas'],
+                'petit julieta' => ['小朱丽叶', 'petit julieta'],
+                'petit royales' => ['小皇家', 'petit royales'],
+                'puritos' => ['小纯', 'puritos'],
+                'regalias de londres' => ['伦敦盛宴', 'regalias de londres'],
+                'sports largos' => ['运动加长', 'sports largos'],
+                'tacos' => ['墨西哥卷', 'tacos'],
+                'linea de oro' => ['金系列', 'linea de oro'],
+                'hidalgos' => ['贵族', 'hidalgos'],
+                'nobles' => ['贵族', 'nobles'],
+                'dianas' => ['戴安娜', 'dianas'],
+            ],
+            
+            // Partagas series
+            'partagas' => [
+                'serie d' => ['d系列', 'serie d'],
+                'serie d no.4' => ['d系列4号', 'd系列四号', 'serie d no.4', 'serie d no. 4', 'serie d #4'],
+                'serie d no.5' => ['d系列5号', 'd系列五号', 'serie d no.5', 'serie d no. 5', 'serie d #5'],
+                'serie d no.6' => ['d系列6号', 'd系列六号', 'serie d no.6', 'serie d no. 6', 'serie d #6'],
+                'serie e' => ['e系列', 'serie e'],
+                'serie e no.2' => ['e系列2号', 'e系列二号', 'serie e no.2', 'serie e no. 2', 'serie e #2'],
+                'serie p' => ['p系列', 'serie p'],
+                'serie p no.2' => ['p系列2号', 'p系列二号', 'serie p no.2', 'serie p no. 2', 'serie p #2'],
+                'lusitanias' => ['卢西塔尼亚', 'lusitanias'],
+                'coronas gordas' => ['胖皇冠', 'coronas gordas'],
+                'coronas junior' => ['少年皇冠', 'coronas junior'],
+                'culebras' => ['三蛇', 'culebras'],
+                'habaneros' => ['哈瓦那', 'habaneros'],
+                'mille fleurs' => ['千花', 'mille fleurs'],
+                'petit coronas especiales' => ['特制小皇冠', 'petit coronas especiales'],
+                'shorts' => ['短', 'shorts'],
+                'super partagas' => ['超级帕特加斯', 'super partagas'],
+                'aristocrats' => ['贵族', 'aristocrats'],
+                'maduro' => ['马杜罗', 'maduro'],
+                'maduro no.1' => ['马杜罗1号', '马杜罗一号', 'maduro no.1', 'maduro no. 1', 'maduro #1'],
+                'maduro no.2' => ['马杜罗2号', '马杜罗二号', 'maduro no.2', 'maduro no. 2', 'maduro #2'],
+                'maduro no.3' => ['马杜罗3号', '马杜罗三号', 'maduro no.3', 'maduro no. 3', 'maduro #3'],
+                'seleccion privada' => ['私人精选', 'seleccion privada'],
+                'presidentes' => ['总统', 'presidentes'],
+                '8-9-8' => ['8-9-8', '898'],
+                'capitols' => ['首都', 'capitols'],
+                'serie du connaisseur' => ['鉴赏家系列', 'serie du connaisseur'],
+                'coronas' => ['皇冠', 'coronas'],
+            ],
+            
+            // Hoyo de Monterrey series
+            'hoyo de monterrey' => [
+                'epicure' => ['美食家', 'epicure'],
+                'epicure no.1' => ['美食家1号', '美食家一号', 'epicure no.1', 'epicure no. 1', 'epicure #1'],
+                'epicure no.2' => ['美食家2号', '美食家二号', 'epicure no.2', 'epicure no. 2', 'epicure #2'],
+                'epicure especial' => ['特别美食家', 'epicure especial'],
+                'epicure deluxe' => ['豪华美食家', 'epicure deluxe'],
+                'petit robusto' => ['小罗布图', 'petit robusto'],
+                'double coronas' => ['双皇冠', 'double coronas'],
+                'le hoyo des dieux' => ['众神', 'le hoyo des dieux'],
+                'le hoyo du maire' => ['市长', 'le hoyo du maire'],
+                'le hoyo du depute' => ['议员', 'le hoyo du depute'],
+                'le hoyo du prince' => ['王子', 'le hoyo du prince'],
+                'le hoyo de san juan' => ['圣胡安', 'le hoyo de san juan'],
+                'le hoyo' => ['洞', 'le hoyo'],
+              'palmas extra' => ['额外棕榈', 'palmas extra'],
+               'petit robustos' => ['小罗布图', 'petit robustos'],
+               'coronations' => ['加冕', 'coronations'],
+               'regalos' => ['礼物', 'regalos'],
+               'rio seco' => ['干河', 'rio seco'],
+               'short hoyo' => ['短霍约', 'short hoyo'],
+               'media corona' => ['半皇冠', 'media corona'],
+               'hermosos no.4' => ['美丽4号', '美丽四号', 'hermosos no.4', 'hermosos no. 4', 'hermosos #4'],
+           ],
+           
+           // H. Upmann series
+           'h. upmann' => [
+               'magnum 46' => ['马格纳姆46', '大酒瓶46', 'magnum 46'],
+               'magnum 50' => ['马格纳姆50', '大酒瓶50', 'magnum 50'],
+               'magnum 54' => ['马格纳姆54', '大酒瓶54', 'magnum 54'],
+               'magnum 56' => ['马格纳姆56', '大酒瓶56', 'magnum 56'],
+               'connossieur' => ['鉴赏家', 'connossieur', 'connoisseur'],
+               'connossieur a' => ['鉴赏家a', 'connossieur a', 'connoisseur a'],
+               'connossieur no.1' => ['鉴赏家1号', '鉴赏家一号', 'connossieur no.1', 'connossieur no. 1', 'connoisseur no.1', 'connoisseur no. 1'],
+               'connossieur no.2' => ['鉴赏家2号', '鉴赏家二号', 'connossieur no.2', 'connossieur no. 2', 'connoisseur no.2', 'connoisseur no. 2'],
+               'half corona' => ['半皇冠', 'half corona'],
+               'coronas junior' => ['少年皇冠', 'coronas junior'],
+               'coronas major' => ['主要皇冠', 'coronas major'],
+               'regalias' => ['皇家', 'regalias'],
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'majestic' => ['雄伟', 'majestic'],
+               'no.2' => ['2号', '二号', 'no.2', 'no. 2', '#2', 'numero 2'],
+               'monarch' => ['君王', 'monarch'],
+               'sir winston' => ['温斯顿爵士', 'sir winston'],
+               'royal robusto' => ['皇家罗布图', 'royal robusto'],
+               'propios' => ['专属', 'propios'],
+               'petit upmann' => ['小乌普曼', 'petit upmann'],
+               'noellas' => ['诺艾拉斯', 'noellas'],
+               'anejados' => ['陈年', 'anejados'],
+           ],
+           
+           // Bolivar series
+           'bolivar' => [
+               'royal coronas' => ['皇家皇冠', 'royal coronas'],
+               'belicosos finos' => ['精制鱼雷', 'belicosos finos'],
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'corona junior' => ['少年皇冠', 'corona junior'],
+               'tubos no.1' => ['管装1号', '管装一号', 'tubos no.1', 'tubos no. 1', 'tubos #1'],
+               'tubos no.2' => ['管装2号', '管装二号', 'tubos no.2', 'tubos no. 2', 'tubos #2'],
+               'tubos no.3' => ['管装3号', '管装三号', 'tubos no.3', 'tubos no. 3', 'tubos #3'],
+               'corona gigantes' => ['巨型皇冠', 'corona gigantes'],
+               'coronas extra' => ['额外皇冠', 'coronas extra'],
+               'gold medal' => ['金牌', 'gold medal'],
+               'libertador' => ['解放者', 'libertador'],
+               'petit belicosos' => ['小鱼雷', 'petit belicosos'],
+               'soberano' => ['君主', 'soberano'],
+               'regionales' => ['地区版', 'regionales'],
+               'britanicas' => ['不列颠', 'britanicas'],
+               'hermosos' => ['美丽', 'hermosos'],
+               'hermosos no.4' => ['美丽4号', '美丽四号', 'hermosos no.4', 'hermosos no. 4', 'hermosos #4'],
+           ],
+           
+           // Punch series
+           'punch' => [
+               'punch' => ['潘趣', 'punch'],
+               'punch punch' => ['潘趣潘趣', 'punch punch'],
+               'double coronas' => ['双皇冠', 'double coronas'],
+               'royal coronation' => ['皇家加冕', 'royal coronation'],
+               'coronations' => ['加冕', 'coronations'],
+               'petit coronations' => ['小加冕', 'petit coronations'],
+               'royal selection no.11' => ['皇家精选11号', '皇家精选十一号', 'royal selection no.11', 'royal selection no. 11', 'royal selection #11'],
+               'royal selection no.12' => ['皇家精选12号', '皇家精选十二号', 'royal selection no.12', 'royal selection no. 12', 'royal selection #12'],
+               'petit punch' => ['小潘趣', 'petit punch'],
+               'super selection no.1' => ['超级精选1号', '超级精选一号', 'super selection no.1', 'super selection no. 1', 'super selection #1'],
+               'super selection no.2' => ['超级精选2号', '超级精选二号', 'super selection no.2', 'super selection no. 2', 'super selection #2'],
+               '48' => ['48号', '48'],
+               '49' => ['49号', '49'],
+               '50' => ['50号', '50'],
+               '55' => ['55号', '55'],
+               '57' => ['57号', '57'],
+               'short de punch' => ['短潘趣', 'short de punch'],
+           ],
+           
+           // Ramon Allones series
+           'ramon allones' => [
+               'specially selected' => ['特别精选', 'specially selected', 'ss'],
+               'small club coronas' => ['小俱乐部皇冠', 'small club coronas', 'scc'],
+               'gigantes' => ['巨人', 'gigantes'],
+               'belicosos' => ['鱼雷', 'belicosos'],
+               'superiores' => ['高级', 'superiores'],
+               'petit belicosos' => ['小鱼雷', 'petit belicosos'],
+               'extra' => ['特级', 'extra'],
+               'hunters & frankau' => ['亨特和弗兰考', 'hunters & frankau', 'hunters and frankau', 'h&f'],
+               'club allones' => ['俱乐部艾罗尼', 'club allones'],
+               'allones extra' => ['艾罗尼特级', 'allones extra'],
+               'allones superiores' => ['艾罗尼高级', 'allones superiores'],
+           ],
+           
+           // Trinidad series
+           'trinidad' => [
+               'fundadores' => ['创始人', 'fundadores'],
+               'coloniales' => ['殖民地', 'coloniales'],
+               'reyes' => ['国王', 'reyes'],
+               'vigia' => ['瞭望', 'vigia'],
+               'media luna' => ['半月', 'media luna'],
+               'topes' => ['顶部', 'topes'],
+               'esmeralda' => ['翠绿宝石', 'esmeralda'],
+               'la trova' => ['游吟诗人', 'la trova'],
+           ],
+           
+           // El Rey del Mundo series
+           'el rey del mundo' => [
+               'choix supreme' => ['至尊精选', 'choix supreme'],
+               'demi tasse' => ['小杯', 'demi tasse'],
+               'grandes de espana' => ['西班牙大公', 'grandes de espana'],
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'tainos' => ['塔伊诺人', 'tainos'],
+               'l\'epoque' => ['时代', 'l\'epoque', 'lepoque'],
+               'infantes' => ['王子', 'infantes'],
+               'lunch club' => ['午餐俱乐部', 'lunch club'],
+           ],
+           
+           // San Cristobal de la Habana series
+           'san cristobal de la habana' => [
+               'el principe' => ['王子', 'el principe'],
+               'la fuerza' => ['力量', 'la fuerza'],
+               'la punta' => ['尖点', 'la punta'],
+               'torreon' => ['塔楼', 'torreon'],
+               'oficios' => ['工艺', 'oficios'],
+               'mercaderes' => ['商人', 'mercaderes'],
+               'muralla' => ['城墙', 'muralla'],
+               'el morro' => ['城堡', 'el morro'],
+           ],
+           
+           // Quai D'Orsay series
+           'quai dorsay' => [
+               'no.50' => ['50号', '五十号', 'no.50', 'no. 50', '#50', 'numero 50'],
+               'no.54' => ['54号', '五十四号', 'no.54', 'no. 54', '#54', 'numero 54'],
+               'corona claro' => ['明亮皇冠', 'corona claro'],
+               'imperiales' => ['帝国', 'imperiales'],
+               'senadores' => ['参议员', 'senadores'],
+               'coronas' => ['皇冠', 'coronas'],
+           ],
+           
+           // La Gloria Cubana series
+           'la gloria cubana' => [
+               'medaille d\'or' => ['金牌', 'medaille d\'or', 'medaille dor'],
+               'medaille d\'or no.1' => ['金牌1号', '金牌一号', 'medaille d\'or no.1', 'medaille d\'or no. 1', 'medaille dor no.1'],
+               'medaille d\'or no.2' => ['金牌2号', '金牌二号', 'medaille d\'or no.2', 'medaille d\'or no. 2', 'medaille dor no.2'],
+               'medaille d\'or no.3' => ['金牌3号', '金牌三号', 'medaille d\'or no.3', 'medaille d\'or no. 3', 'medaille dor no.3'],
+               'medaille d\'or no.4' => ['金牌4号', '金牌四号', 'medaille d\'or no.4', 'medaille d\'or no. 4', 'medaille dor no.4'],
+               'gloriosos' => ['光荣', 'gloriosos'],
+               'inmensa' => ['巨大', 'inmensa'],
+               'tainos' => ['塔伊诺人', 'tainos'],
+           ],
+           
+           // Jose L. Piedra series
+           'jose l. piedra' => [
+               'cazadores' => ['猎人', 'cazadores'],
+               'conservas' => ['保存', 'conservas'],
+               'brevas' => ['无花果', 'brevas'],
+               'petit cazadores' => ['小猎人', 'petit cazadores'],
+               'nacionales' => ['国民', 'nacionales'],
+               'petit cetros' => ['小权杖', 'petit cetros'],
+           ],
+           
+           // Fonseca series
+           'fonseca' => [
+               'no.1' => ['1号', '一号', 'no.1', 'no. 1', '#1', 'numero 1'],
+               'cosacos' => ['哥萨克', 'cosacos'],
+               'delicias' => ['美味', 'delicias'],
+               'kadetes' => ['学员', 'kadetes'],
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+           ],
+           
+           // Juan Lopez series
+           'juan lopez' => [
+               'seleccion no.1' => ['精选1号', '精选一号', 'seleccion no.1', 'seleccion no. 1', 'seleccion #1'],
+               'seleccion no.2' => ['精选2号', '精选二号', 'seleccion no.2', 'seleccion no. 2', 'seleccion #2'],
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+           ],
+           
+           // Sancho Panza series
+           'sancho panza' => [
+               'belicosos' => ['鱼雷', 'belicosos'],
+               'non plus' => ['无与伦比', 'non plus'],
+               'molinos' => ['风车', 'molinos'],
+               'sanchos' => ['桑乔', 'sanchos'],
+               'coronas gigantes' => ['巨型皇冠', 'coronas gigantes'],
+           ],
+           
+           // Rafael Gonzalez series
+           'rafael gonzalez' => [
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'perlas' => ['珍珠', 'perlas'],
+               'coronas extra' => ['额外皇冠', 'coronas extra'],
+               'panetelas extra' => ['额外小潘', 'panetelas extra'],
+           ],
+           
+           // Por Larranaga series
+           'por larranaga' => [
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'montecarlos' => ['蒙特卡洛', 'montecarlos'],
+               'galanes' => ['英俊', 'galanes'],
+               'picadores' => ['斗牛士', 'picadores'],
+           ],
+           
+           // Diplomáticos series
+           'diplomáticos' => [
+               'no.2' => ['2号', '二号', 'no.2', 'no. 2', '#2', 'numero 2'],
+               'excelencia' => ['卓越', 'excelencia'],
+               'bushido' => ['武士道', 'bushido'],
+               'ammunition' => ['弹药', 'ammunition'],
+           ],
+           
+           // La Flor de Cano series
+           'la flor de cano' => [
+               'petit coronas' => ['小皇冠', 'petit coronas'],
+               'selectos' => ['精选', 'selectos'],
+               'gran cano' => ['大卡诺', 'gran cano'],
+           ],
+           
+           // Quintero series
+           'quintero' => [
+               'favoritos' => ['最爱', 'favoritos'],
+               'londres extra' => ['伦敦特级', 'londres extra'],
+               'petit quinteros' => ['小昆特罗', 'petit quinteros'],
+               'brevas' => ['无花果', 'brevas'],
+               'panetelas' => ['小潘纳', 'panetelas'],
+           ],
+           
+           // Vegueros series
+           'vegueros' => [
+               'centrofinos' => ['中心精致', 'centrofinos'],
+               'entretiempos' => ['间隔时间', 'entretiempos'],
+               'tapados' => ['覆盖', 'tapados'],
+               'mananitas' => ['早晨', 'mananitas'],
+               'especiales no.1' => ['特别1号', '特别一号', 'especiales no.1', 'especiales no. 1', 'especiales #1'],
+               'especiales no.2' => ['特别2号', '特别二号', 'especiales no.2', 'especiales no. 2', 'especiales #2'],
+               'mareva' => ['马雷瓦', 'mareva'],
+           ],
+           
+           // Cuaba series
+           'cuaba' => [
+               'distinguidos' => ['杰出', 'distinguidos'],
+               'diademas' => ['王冠', 'diademas'],
+               'exclusivos' => ['专属', 'exclusivos'],
+               'generosos' => ['大方', 'generosos'],
+               'salomones' => ['所罗门', 'salomones'],
+               'tradicionales' => ['传统', 'tradicionales'],
+               'divinos' => ['神圣', 'divinos'],
+           ],
+           
+           // Arturo Fuente series
+           'arturo fuente' => [
+               'opus x' => ['作品x', 'opus x'],
+               'hemingway' => ['海明威', 'hemingway'],
+               'don carlos' => ['唐卡洛斯', 'don carlos'],
+               'anejo' => ['陈年', 'anejo'],
+               'chateau fuente' => ['富恩特城堡', 'chateau fuente'],
+               'curly head' => ['卷发头', 'curly head'],
+               'gran reserva' => ['特级珍藏', 'gran reserva'],
+               'casa cuba' => ['古巴之家', 'casa cuba'],
+               'canones' => ['大炮', 'canones'],
+               'flor fina 8-5-8' => ['精致之花8-5-8', 'flor fina 8-5-8', 'flor fina 858'],
+               'rosado' => ['粉红', 'rosado'],
+               'magnum r' => ['马格南r', 'magnum r'],
+               'short story' => ['短篇小说', 'short story'],
+               'between the lines' => ['言外之意', 'between the lines'],
+               'destino al siglo' => ['世纪命运', 'destino al siglo'],
+               'rare pink' => ['稀有粉红', 'rare pink'],
+               'shark' => ['鲨鱼', 'shark'],
+               'king power' => ['国王力量', 'king power'],
+               'eye of the shark' => ['鲨鱼之眼', 'eye of the shark'],
+               'opus x 20th anniversary' => ['作品x二十周年', 'opus x 20th anniversary'],
+               'rare black' => ['稀有黑', 'rare black'],
+           ],
+           
+           // Padron series
+           'padron' => [
+               '1964 anniversary' => ['1964周年', '1964周年纪念', '1964 anniversary'],
+               '1926 series' => ['1926系列', '1926 series'],
+               'family reserve' => ['家族珍藏', 'family reserve'],
+               'damaso' => ['达马索', 'damaso'],
+               'maduro' => ['马杜罗', 'maduro'],
+               'natural' => ['自然', 'natural'],
+               '2000' => ['2000', '二千'],
+               '3000' => ['3000', '三千'],
+               '4000' => ['4000', '四千'],
+               '5000' => ['5000', '五千'],
+               '6000' => ['6000', '六千'],
+               '7000' => ['7000', '七千'],
+               '80 years' => ['80年', '八十年', '80 years', 'ochenta anos'],
+               '50 years' => ['50年', '五十年', '50 years', 'cincuenta anos'],
+               '45 years' => ['45年', '四十五年', '45 years', 'cuarenta y cinco anos'],
+               '40 years' => ['40年', '四十年', '40 years', 'cuarenta anos'],
+               'no.88' => ['88号', '八十八号', 'no.88', 'no. 88', '#88', 'numero 88'],
+               'no.90' => ['90号', '九十号', 'no.90', 'no. 90', '#90', 'numero 90'],
+               'exclusivo' => ['专属', 'exclusivo'],
+           ],
+           
+           // Davidoff series
+           'davidoff' => [
+               'signature' => ['签名', 'signature'],
+               'grand cru' => ['特级酒', 'grand cru'],
+               'aniversario' => ['周年', 'aniversario'],
+               'millennium blend' => ['千禧混合', 'millennium blend'],
+               'nicaragua' => ['尼加拉瓜', 'nicaragua'],
+               'colorado claro' => ['科罗拉多克拉罗', 'colorado claro'],
+               'escurio' => ['神秘', 'escurio'],
+               'yamasa' => ['山麻萨', 'yamasa'],
+               'royal release' => ['皇家发行', 'royal release'],
+               'primeros' => ['第一', 'primeros'],
+               'special' => ['特别', 'special'],
+               'winston churchill' => ['温斯顿丘吉尔', 'winston churchill'],
+               'late hour' => ['深夜', 'late hour'],
+               'chef\'s edition' => ['主厨版', 'chef\'s edition', 'chefs edition'],
+               'masterpiece' => ['杰作', 'masterpiece'],
+               'special t' => ['特殊t', 'special t'],
+               'double r' => ['双r', 'double r'],
+               'special r' => ['特殊r', 'special r'],
+               'entreacto' => ['幕间', 'entreacto'],
+               'puro d\'oro' => ['纯金', 'puro d\'oro', 'puro doro'],
+           ],
+           
+           // My Father series
+           'my father' => [
+               'le bijou' => ['珠宝', 'le bijou'],
+               'la opulencia' => ['富裕', 'la opulencia'],
+               'the judge' => ['法官', 'the judge'],
+               'garcia & garcia' => ['加西亚与加西亚', 'garcia & garcia', 'garcia and garcia'],
+               'the legend' => ['传奇', 'the legend'],
+               'don pepin' => ['唐佩平', 'don pepin'],
+               'la gran oferta' => ['大优惠', 'la gran oferta'],
+               'flor de las antillas' => ['安的列斯之花', 'flor de las antillas'],
+               'la promesa' => ['承诺', 'la promesa'],
+               'la antiguedad' => ['古老', 'la antiguedad'],
+               'centurion' => ['百夫长', 'centurion'],
+               'jaime garcia' => ['海梅加西亚', 'jaime garcia'],
+               'vegas cubanas' => ['古巴维加斯', 'vegas cubanas'],
+               'el centurion' => ['百夫长', 'el centurion'],
+               'el centurion h-2k-ct' => ['百夫长h-2k-ct', 'el centurion h-2k-ct'],
+           ],
+           
+           // Oliva series
+           'oliva' => [
+               'serie v' => ['v系列', 'serie v'],
+               'serie v melanio' => ['v系列梅拉尼奥', 'serie v melanio'],
+               'serie g' => ['g系列', 'serie g'],
+               'serie o' => ['o系列', 'serie o'],
+               'master blends' => ['大师混合', 'master blends'],
+               'nub' => ['小块', 'nub'],
+               'cain' => ['该隐', 'cain'],
+               'connecticut reserve' => ['康涅狄格珍藏', 'connecticut reserve'],
+               'gilberto oliva' => ['吉尔伯特奥利瓦', 'gilberto oliva'],
+               'nub habano' => ['小块哈瓦那', 'nub habano'],
+               'nub cameroon' => ['小块喀麦隆', 'nub cameroon'],
+               'nub connecticut' => ['小块康涅狄格', 'nub connecticut'],
+               'nub maduro' => ['小块马杜罗', 'nub maduro'],
+               'cain f' => ['该隐f', 'cain f'],
+               'cain maduro' => ['该隐马杜罗', 'cain maduro'],
+               'cain daytona' => ['该隐代托纳', 'cain daytona'],
+           ],
+           
+           // Drew Estate series
+           'drew estate' => [
+               'liga privada' => ['私人联盟', 'liga privada'],
+               'liga privada no.9' => ['私人联盟9号', '私人联盟九号', 'liga privada no.9', 'liga privada no. 9', 'liga privada #9'],
+               'liga privada t52' => ['私人联盟t52', 'liga privada t52'],
+               'undercrown' => ['皇冠之下', 'undercrown'],
+               'undercrown shade' => ['皇冠之下日影', 'undercrown shade'],
+               'undercrown maduro' => ['皇冠之下马杜罗', 'undercrown maduro'],
+               'undercrown sun grown' => ['皇冠之下日晒', 'undercrown sun grown'],
+               'acid' => ['酸', 'acid'],
+               'acid blondie' => ['酸金发', 'acid blondie'],
+               'acid kuba kuba' => ['酸古巴古巴', 'acid kuba kuba'],
+               'herrera esteli' => ['埃雷拉埃斯特利', 'herrera esteli'],
+               'herrera esteli norteno' => ['埃雷拉埃斯特利北方', 'herrera esteli norteno'],
+               'herrera esteli brazilian maduro' => ['埃雷拉埃斯特利巴西马杜罗', 'herrera esteli brazilian maduro'],
+               'florida sun grown' => ['佛罗里达日晒', 'florida sun grown'],
+               'unico serie' => ['独特系列', 'unico serie'],
+               'flying pig' => ['飞猪', 'flying pig'],
+               'dirty rat' => ['肮脏老鼠', 'dirty rat'],
+               'feral flying pig' => ['野性飞猪', 'feral flying pig'],
+               'papas fritas' => ['薯条', 'papas fritas'],
+               'velvet rat' => ['天鹅绒老鼠', 'velvet rat'],
+               'ratzilla' => ['大老鼠', 'ratzilla'],
+               'l40' => ['l40'],
+               'nasty fritas' => ['肮脏薯条', 'nasty fritas'],
+               'year of the rat' => ['鼠年', 'year of the rat'],
+               'java' => ['爪哇', 'java'],
+               'isla del sol' => ['太阳岛', 'isla del sol'],
+               'tabak especial' => ['特别烟草', 'tabak especial'],
+               'deadwood' => ['枯木', 'deadwood'],
+               'nica rustica' => ['尼加乡村', 'nica rustica'],
+               'larutan' => ['拉鲁坦', 'larutan'],
+               'pappy van winkle' => ['帕皮范温克尔', 'pappy van winkle'],
+               'bavarian' => ['巴伐利亚', 'bavarian'],
+           ],
+           
+           // Ashton series
+           'ashton' => [
+               'classic' => ['经典', 'classic'],
+               'cabinet' => ['内阁', 'cabinet'],
+               'aged maduro' => ['陈年马杜罗', 'aged maduro'],
+               'heritage puro sol' => ['传承纯太阳', 'heritage puro sol'],
+               'vsg' => ['vsg', 'virgin sun grown'],
+               'symmetry' => ['对称', 'symmetry'],
+               'esg' => ['esg', 'estate sun grown'],
+               'paradiso' => ['天堂', 'paradiso'],
+           ],
+           
+           // Non-Cuban Montecristo series
+           'montecristo (non-cuban)' => [
+               'classic' => ['经典', 'classic'],
+               'platinum' => ['白金', 'platinum'],
+               'white' => ['白', 'white'],
+               'espada' => ['剑', 'espada'],
+               'epic' => ['史诗', 'epic'],
+               'artisan series' => ['工匠系列', 'artisan series'],
+               'monte' => ['蒙特', 'monte'],
+               'pilotico' => ['飞行员', 'pilotico'],
+               'crafted by aj fernandez' => ['aj费尔南德斯制作', 'crafted by aj fernandez'],
+               'nicaragua series' => ['尼加拉瓜系列', 'nicaragua series'],
+               'epic craft cured' => ['史诗工艺熟成', 'epic craft cured'],
+               'linea 1935' => ['1935系列', 'linea 1935'],
+               'espada oscuro' => ['黑剑', 'espada oscuro'],
+               'epic blue' => ['史诗蓝', 'epic blue'],
+               'epic red' => ['史诗红', 'epic red'],
+               'heritage series' => ['传承系列', 'heritage series'],
+           ],
+       ];
+
+       // Initialize common packaging terms
+       $this->packaging_patterns = [
+           'box' => ['盒', '箱', 'box', 'boxes'],
+           'cabinet' => ['柜', '木盒', 'cabinet', 'cabinets'],
+           'jar' => ['罐', '陶罐', 'jar', 'jars'],
+           'pack' => ['包', '小包', 'pack', 'packs'],
+           'bundle' => ['捆', '束', 'bundle', 'bundles'],
+           'tin' => ['锡盒', '铁盒', 'tin', 'tins'],
+           'tubos' => ['管装', 'tubo', 'tubos', 'tube', 'tubes'],
+           'carton' => ['纸盒', 'carton', 'cartons'],
+'sampler' => ['样品盒', 'sampler', 'samplers'],
+           'slide lid box' => ['滑盖盒', 'slide lid box', 'slide lid'],
+           'dress box' => ['礼盒', 'dress box'],
+           'varnished box' => ['上漆盒', 'varnished box'],
+           'matte box' => ['哑光盒', 'matte box'],
+           'slb' => ['slb', 'slide lid box'],
+           'semi plain box' => ['半普通盒', 'semi plain box', 'semi-plain box'],
+           'semiboite nature' => ['半自然盒', 'semiboite nature'],
+           'box of' => ['盒装', 'box of'],
+           'pack of' => ['包装', 'pack of'],
+           'bundle of' => ['捆装', 'bundle of'],
+           'jar of' => ['罐装', 'jar of'],
+           'tin of' => ['锡盒装', 'tin of'],
+           'cabinet of' => ['柜装', 'cabinet of'],
+           'carton of' => ['纸盒装', 'carton of'],
+           'tubos of' => ['管装的', 'tubos of'],
+           'cab' => ['柜', 'cab'],
+           'tray' => ['托盘', 'tray'],
+           'box sb' => ['盒sb', 'box sb'],
+           'box slb' => ['盒slb', 'box slb'],
+           'ceramic jar' => ['陶瓷罐', 'ceramic jar'],
+           'glass jar' => ['玻璃罐', 'glass jar'],
+           'humidor' => ['保湿盒', 'humidor'],
+           'travel humidor' => ['旅行保湿盒', 'travel humidor'],
+           'cello' => ['透明包装', 'cello', 'cellophane'],
+           'refill' => ['补充装', 'refill'],
+           'gift box' => ['礼品盒', 'gift box'],
+           'gift pack' => ['礼品包', 'gift pack'],
+           'gift set' => ['礼品套装', 'gift set'],
+           'display' => ['展示', 'display', 'display case'],
+       ];
+
+       // Initialize special edition terms
+       $this->special_editions = [
+           'limited edition' => ['限量版', 'limited edition', 'le'],
+           'limited' => ['限量', 'limited'],
+           'edicion limitada' => ['限量版', 'edicion limitada', 'el'],
+           'reserva' => ['珍藏', 'reserva'],
+           'gran reserva' => ['特级珍藏', 'gran reserva'],
+           'coleccion habanos' => ['哈瓦那收藏', 'coleccion habanos'],
+           'book' => ['书', 'book'],
+           'humidor' => ['保湿盒', 'humidor'],
+           'vintage' => ['年份', 'vintage'],
+           'aged' => ['陈年', 'aged'],
+           'anejados' => ['陈年', 'anejados'],
+           'anniversary' => ['周年', '周年纪念', 'anniversary'],
+           'aniversario' => ['周年', 'aniversario'],
+           'commemorative' => ['纪念', 'commemorative'],
+           'special' => ['特别', 'special'],
+           'especiales' => ['特别', 'especiales'],
+           'seleccion' => ['精选', 'seleccion'],
+           'casa del habano' => ['哈瓦那之家', 'casa del habano', 'lcdh'],
+           'release' => ['发行', 'release'],
+           'edition' => ['版', 'edition'],
+           'edicion' => ['版', 'edicion'],
+           'series' => ['系列', 'series'],
+           'serie' => ['系列', 'serie'],
+           'collection' => ['收藏', 'collection'],
+           'coleccion' => ['收藏', 'coleccion'],
+           'coffret' => ['套盒', 'coffret'],
+           'travel retail' => ['旅行零售', 'travel retail'],
+           'duty free' => ['免税', 'duty free'],
+           'exclusivo' => ['专属', 'exclusivo'],
+           'exclusive' => ['专属', 'exclusive'],
+           'friends' => ['朋友', 'friends'],
+           'amigos' => ['朋友', 'amigos'],
+           'heritage' => ['传承', 'heritage'],
+           'legacy' => ['传承', 'legacy'],
+           'estd' => ['成立', 'estd', 'established'],
+           'est' => ['成立', 'est', 'established'],
+           'extra' => ['额外', 'extra'],
+           'old' => ['老', 'old'],
+           'churchill' => ['丘吉尔', 'churchill'],
+           'torpedo' => ['鱼雷', 'torpedo'],
+           'robusto' => ['罗布图', 'robusto'],
+           'corona' => ['皇冠', 'corona'],
+           'sublime' => ['崇高', 'sublime'],
+           'double corona' => ['双皇冠', 'double corona'],
+           'perfecto' => ['完美', 'perfecto'],
+           'petit corona' => ['小皇冠', 'petit corona'],
+           'belicoso' => ['鱼雷', 'belicoso'],
+           'toro' => ['公牛', 'toro'],
+           'royal' => ['皇家', 'royal'],
+           'signature' => ['签名', 'signature'],
+           'piramides' => ['金字塔', 'piramides'],
+           'double robusto' => ['双罗布图', 'double robusto'],
+           'churchill extra' => ['特制丘吉尔', 'churchill extra'],
+           'grand corona' => ['大皇冠', 'grand corona'],
+           'corona extra' => ['特制皇冠', 'corona extra'],
+           'grand churchill' => ['大丘吉尔', 'grand churchill'],
+           'lonsdale' => ['朗斯代尔', 'lonsdale'],
+           'petit churchill' => ['小丘吉尔', 'petit churchill'],
+           'double torpedo' => ['双鱼雷', 'double torpedo'],
+           'jumbo' => ['巨型', 'jumbo'],
+           'short robusto' => ['短罗布图', 'short robusto'],
+           'presidente' => ['总统', 'presidente'],
+           'churchill robusto' => ['丘吉尔罗布图', 'churchill robusto'],
+           'fino' => ['细', 'fino'],
+           'culebra' => ['三蛇', 'culebra'],
+           'short churchill' => ['短丘吉尔', 'short churchill'],
+           'long churchill' => ['长丘吉尔', 'long churchill'],
+           'rothschild' => ['罗斯柴尔德', 'rothschild'],
+           'double belicoso' => ['双鱼雷', 'double belicoso'],
+           'super robusto' => ['超级罗布图', 'super robusto'],
+           'short corona' => ['短皇冠', 'short corona'],
+           'dalia' => ['达利亚', 'dalia'],
+           'julieta' => ['朱丽叶', 'julieta'],
+           'corona gorda' => ['胖皇冠', 'corona gorda'],
+           'short torpedo' => ['短鱼雷', 'short torpedo'],
+           'long corona' => ['长皇冠', 'long corona'],
+           'magnum' => ['马格南', 'magnum'],
+           'half corona' => ['半皇冠', 'half corona'],
+           'panetela' => ['小潘纳', 'panetela'],
+           'long panetela' => ['长小潘纳', 'long panetela'],
+           'demi' => ['半', 'demi'],
+           'puritos' => ['纯小', 'puritos'],
+           'minutos' => ['分钟', 'minutos'],
+           'pantelas' => ['小潘纳', 'pantelas'],
+           'club' => ['俱乐部', 'club'],
+           'petit' => ['小', 'petit'],
+           'slim' => ['细', 'slim'],
+           'short' => ['短', 'short'],
+           'grande' => ['大', 'grande'],
+           'wide' => ['宽', 'wide'],
+           'small' => ['小', 'small'],
+           'long' => ['长', 'long'],
+           'thin' => ['细', 'thin'],
+           'fat' => ['胖', 'fat'],
+           'double' => ['双', 'double'],
+           'triple' => ['三', 'triple'],
+           'gran' => ['大', 'gran'],
+           'mini' => ['迷你', 'mini'],
+           'tiny' => ['微小', 'tiny'],
+           'medio' => ['中', 'medio'],
+           'gigante' => ['巨大', 'gigante'],
+           'super' => ['超级', 'super'],
+           'premium' => ['高级', 'premium'],
+           'classic' => ['经典', 'classic'],
+           'deluxe' => ['豪华', 'deluxe'],
+           'professional' => ['专业', 'professional'],
+           'standard' => ['标准', 'standard'],
+           'custom' => ['定制', 'custom'],
+       ];
+
+       // Initialize regional edition terms
+       $this->regional_editions = [
+           'regional edition' => ['地区版', 'regional edition', 're'],
+           'edicion regional' => ['地区版', 'edicion regional', 'er'],
+           'asia pacific' => ['亚太', 'asia pacific'],
+           'asian pacific' => ['亚太', 'asian pacific'],
+           'uk' => ['英国', 'uk', 'united kingdom'],
+           'great britain' => ['英国', 'great britain'],
+           'channel islands' => ['海峡群岛', 'channel islands'],
+           'united kingdom' => ['英国', 'united kingdom'],
+           'espana' => ['西班牙', 'espana', 'spain'],
+           'germany' => ['德国', 'germany', 'deutschland'],
+           'deutschland' => ['德国', 'deutschland'],
+           'benelux' => ['比荷卢', 'benelux'],
+           'switzerland' => ['瑞士', 'switzerland'],
+           'schweiz' => ['瑞士', 'schweiz'],
+           'suisse' => ['瑞士', 'suisse'],
+           'svizzera' => ['瑞士', 'svizzera'],
+           'andorra' => ['安道尔', 'andorra'],
+           'italy' => ['意大利', 'italy'],
+           'italia' => ['意大利', 'italia'],
+           'france' => ['法国', 'france'],
+           'canada' => ['加拿大', 'canada'],
+           'mexico' => ['墨西哥', 'mexico'],
+           'cuba' => ['古巴', 'cuba'],
+           'caribbean' => ['加勒比', 'caribbean'],
+           'middle east' => ['中东', 'middle east'],
+           'asia' => ['亚洲', 'asia'],
+           'australia' => ['澳大利亚', 'australia'],
+           'china' => ['中国', 'china'],
+           'hong kong' => ['香港', 'hong kong'],
+           'taiwan' => ['台湾', 'taiwan'],
+           'macau' => ['澳门', 'macau'],
+           'singapore' => ['新加坡', 'singapore'],
+           'japan' => ['日本', 'japan'],
+           'russia' => ['俄罗斯', 'russia'],
+           'portugal' => ['葡萄牙', 'portugal'],
+           'greece' => ['希腊', 'greece'],
+           'israel' => ['以色列', 'israel'],
+           'lebanon' => ['黎巴嫩', 'lebanon'],
+           'united arab emirates' => ['阿联酋', 'united arab emirates', 'uae'],
+           'uae' => ['阿联酋', 'uae'],
+           'baltics' => ['波罗的海', 'baltics'],
+           'nordics' => ['北欧', 'nordics'],
+           'scandinavia' => ['斯堪的纳维亚', 'scandinavia'],
+           'denmark' => ['丹麦', 'denmark'],
+           'norway' => ['挪威', 'norway'],
+           'sweden' => ['瑞典', 'sweden'],
+           'finland' => ['芬兰', 'finland'],
+           'pacific' => ['太平洋', 'pacific'],
+           'asia pacifico' => ['亚太', 'asia pacifico'],
+           'adriatic' => ['亚得里亚海', 'adriatic'],
+       ];
+
+       // Initialize limited editions
+       $this->limited_editions = [
+           'limited edition' => ['限量版', 'limited edition', 'le'],
+           'edicion limitada' => ['限量版', 'edicion limitada', 'el'],
+           'limitada' => ['限量', 'limitada'],
+           'anniversary' => ['周年', 'anniversary'],
+           'collezione' => ['收藏', 'collezione'],
+           'reserva' => ['珍藏', 'reserva'],
+           'gran reserva' => ['特级珍藏', 'gran reserva'],
+           'habanos collection' => ['哈瓦那收藏', 'habanos collection'],
+           'coleccion habanos' => ['哈瓦那收藏', 'coleccion habanos'],
+           'replica' => ['复刻', 'replica'],
+           'vintage' => ['年份', 'vintage'],
+           'book' => ['书', 'book'],
+           'anejados' => ['陈年', 'anejados'],
+           'aged' => ['陈年', 'aged'],
+           'humidor' => ['保湿盒', 'humidor'],
+           'habanos specialist' => ['哈瓦那专家', 'habanos specialist'],
+           'commemorative' => ['纪念', 'commemorative'],
+           'travel retail' => ['旅行零售', 'travel retail'],
+           'rare' => ['稀有', 'rare'],
+           'rare le' => ['稀有限量版', 'rare le'],
+           'vendedor' => ['销售', 'vendedor'],
+           'diplomatic' => ['外交', 'diplomatic'],
+           'duty free' => ['免税', 'duty free'],
+           'heritage' => ['传承', 'heritage'],
+           'friends' => ['朋友', 'friends'],
+           'amigos' => ['朋友', 'amigos'],
+           'millennium' => ['千禧', 'millennium'],
+           'jar' => ['罐', 'jar'],
+           'anniversary jar' => ['周年罐', 'anniversary jar'],
+           'ceramic jar' => ['陶瓷罐', 'ceramic jar'],
+           'glass jar' => ['玻璃罐', 'glass jar'],
+       ];
+
+       // Initialize brand aliases for different naming conventions and common misspellings
+       $this->brand_aliases = [
+           'mc' => 'montecristo',
+           'monte' => 'montecristo',
+           'monty' => 'montecristo',
+           'ryj' => 'romeo y julieta',
+           'romeo' => 'romeo y julieta',
+           'romeo & julieta' => 'romeo y julieta',
+           'romeo and julieta' => 'romeo y julieta',
+           'hdm' => 'hoyo de monterrey',
+           'hoyo' => 'hoyo de monterrey',
+           'partagas serie' => 'partagas',
+           'psd4' => 'partagas',
+           'parti' => 'partagas',
+           'punch punch' => 'punch',
+           'ha' => 'h. upmann',
+           'upmann' => 'h. upmann',
+           'h upmann' => 'h. upmann',
+           'h.upmann' => 'h. upmann',
+           'boli' => 'bolivar',
+           'rass' => 'ramon allones',
+           'ra' => 'ramon allones',
+           'trini' => 'trinidad',
+           'quai d\'orsay' => 'quai dorsay',
+           'qdo' => 'quai dorsay',
+           'quay dorsay' => 'quai dorsay',
+           'josÿl piedra' => 'jose l. piedra',
+           'jlp' => 'jose l. piedra',
+           'jose piedra' => 'jose l. piedra',
+           'jose l piedra' => 'jose l. piedra',
+           'erdm' => 'el rey del mundo',
+           'rey del mundo' => 'el rey del mundo',
+           'scdlh' => 'san cristobal de la habana',
+           'san cristobal' => 'san cristobal de la habana',
+           'scih' => 'san cristobal de la habana',
+           'vega' => 'vegueros',
+           'veguero' => 'vegueros',
+           'juanl' => 'juan lopez',
+           'jl' => 'juan lopez',
+           'lgc' => 'la gloria cubana',
+           'fonsi' => 'fonseca',
+           'rafael gonzales' => 'rafael gonzalez',
+           'rg' => 'rafael gonzalez',
+           'sp' => 'sancho panza',
+           'sancho' => 'sancho panza',
+           'por larr' => 'por larranaga',
+           'pl' => 'por larranaga',
+           'quintero y hermano' => 'quintero',
+           'qye' => 'quintero',
+           'quintero y hno' => 'quintero',
+           'la flor de cano' => 'la flor de cano',
+           'lfdc' => 'la flor de cano',
+           'diplomaticos' => 'diplomáticos',
+           'diplo' => 'diplomáticos',
+           'diplos' => 'diplomáticos',
+           'cohiba behike' => 'cohiba',
+           'cohiba siglo' => 'cohiba',
+           'fuente' => 'arturo fuente',
+           'af' => 'arturo fuente',
+           'don carlos edicion de aniversario' => 'arturo fuente',
+           'ashton vsg' => 'ashton',
+           'ashton esg' => 'ashton',
+           'ashton cabinet' => 'ashton',
+           'ashton symmetry' => 'ashton',
+           'ashton classic' => 'ashton',
+           'padron family reserve' => 'padron',
+           'padron 1964' => 'padron',
+           'padron 1926' => 'padron',
+           'davidoff winston churchill' => 'davidoff',
+           'davidoff aniversario' => 'davidoff',
+           'davidoff signature' => 'davidoff',
+           'davidoff millennium' => 'davidoff',
+           'mf' => 'my father',
+           'my father cigars' => 'my father',
+           'my father le bijou' => 'my father',
+           'flor de las antillas' => 'my father',
+           'oliva serie v' => 'oliva',
+           'oliva serie o' => 'oliva',
+           'oliva serie g' => 'oliva',
+           'oliva master blends' => 'oliva',
+           'undercrown' => 'drew estate',
+           'liga privada' => 'drew estate',
+           'acid' => 'drew estate',
+           'herrera esteli' => 'drew estate',
+           'ab' => 'alec bradley',
+           'alec' => 'alec bradley',
+           'rp' => 'rocky patel',
+           'rocky' => 'rocky patel',
+           'lfd' => 'la flor dominicana',
+           'la flor' => 'la flor dominicana',
+           'aj' => 'aj fernandez',
+           'aj fernandez' => 'aj fernandez',
+           'crowned' => 'crowned heads',
+           'ch' => 'crowned heads',
+           'jdn' => 'joya de nicaragua',
+           'joya' => 'joya de nicaragua',
+           'tatuaje' => 'tatuaje',
+           'tat' => 'tatuaje',
+           'pete johnson' => 'tatuaje',
+           'nc' => ' (non-cuban)',
+           'non cuban' => ' (non-cuban)',
+           'non-cuban' => ' (non-cuban)',
+           'general' => ' (non-cuban)',
+           'dominican' => ' (non-cuban)',
+           'dominicano' => ' (non-cuban)',
+           'altadis' => ' (non-cuban)',
+           'diademas' => ' (non-cuban)',
+           'romeo dominicana' => 'romeo y julieta (non-cuban)',
+           'montecristo dominicana' => 'montecristo (non-cuban)',
+       ];
+
+       // Initialize series aliases (common series name variations and abbreviations)
+       $this->series_aliases = [
+           'churchill' => 'churchill',
+           'churchy' => 'churchill',
+           'churrchy' => 'churchill',
+           'torpedo' => 'torpedo',
+           'torps' => 'torpedo',
+           'torped' => 'torpedo',
+           'torp' => 'torpedo',
+           'robusto' => 'robusto',
+           'robust' => 'robusto',
+           'robustos' => 'robusto',
+           'robo' => 'robusto',
+           'robs' => 'robusto',
+           'corona' => 'corona',
+           'coronas' => 'corona',
+           'coro' => 'corona',
+           'double corona' => 'double corona',
+           'dc' => 'double corona',
+           'dbl corona' => 'double corona',
+           'petit corona' => 'petit corona',
+           'petite corona' => 'petit corona',
+           'pc' => 'petit corona',
+           'petit coro' => 'petit corona',
+           'belicoso' => 'belicoso',
+           'belicosos' => 'belicoso',
+           'beli' => 'belicoso',
+           'bls' => 'belicoso',
+           'toro' => 'toro',
+           'piramide' => 'piramides',
+           'piramides' => 'piramides',
+           'pyram' => 'piramides',
+           'pyramide' => 'piramides',
+           'pyramid' => 'piramides',
+           'perfecto' => 'perfecto',
+           'perf' => 'perfecto',
+           'lonsdale' => 'lonsdale',
+           'lons' => 'lonsdale',
+           'lonnie' => 'lonsdale',
+           'lancero' => 'lanceros',
+           'lanceros' => 'lanceros',
+           'lances' => 'lanceros',
+           'lance' => 'lanceros',
+           'gordo' => 'gordo',
+           'gordito' => 'gordito',
+           'gordos' => 'gordo',
+           'gran corona' => 'gran corona',
+           'gc' => 'gran corona',
+           'panetela' => 'panetela',
+           'pans' => 'panetela',
+           'pantela' => 'panetela',
+           'serie d no. 4' => 'serie d no.4',
+           'serie d 4' => 'serie d no.4',
+           'd4' => 'serie d no.4',
+           'serie d#4' => 'serie d no.4',
+           'sd4' => 'serie d no.4',
+           'serie d4' => 'serie d no.4',
+           'psd4' => 'serie d no.4',
+           'partagas d4' => 'serie d no.4',
+           'partagas serie d no.4' => 'serie d no.4',
+           'serie d no. 5' => 'serie d no.5',
+           'serie d 5' => 'serie d no.5',
+           'd5' => 'serie d no.5',
+           'serie d#5' => 'serie d no.5',
+           'sd5' => 'serie d no.5',
+           'serie d5' => 'serie d no.5',
+           'psd5' => 'serie d no.5',
+           'partagas d5' => 'serie d no.5',
+           'partagas serie d no.5' => 'serie d no.5',
+           'serie d no. 6' => 'serie d no.6',
+           'serie d 6' => 'serie d no.6',
+           'd6' => 'serie d no.6',
+           'serie d#6' => 'serie d no.6',
+           'sd6' => 'serie d no.6',
+           'serie d6' => 'serie d no.6',
+           'psd6' => 'serie d no.6',
+           'partagas d6' => 'serie d no.6',
+           'partagas serie d no.6' => 'serie d no.6',
+           'serie e no. 2' => 'serie e no.2',
+           'serie e 2' => 'serie e no.2',
+           'e2' => 'serie e no.2',
+           'serie e#2' => 'serie e no.2',
+           'se2' => 'serie e no.2',
+           'serie e2' => 'serie e no.2',
+           'pse2' => 'serie e no.2',
+           'partagas e2' => 'serie e no.2',
+           'partagas serie e no.2' => 'serie e no.2',
+           'serie p no. 2' => 'serie p no.2',
+           'serie p 2' => 'serie p no.2',
+           'p2' => 'serie p no.2',
+           'serie p#2' => 'serie p no.2',
+           'sp2' => 'serie p no.2',
+           'serie p2' => 'serie p no.2',
+           'psp2' => 'serie p no.2',
+           'partagas p2' => 'serie p no.2',
+           'partagas serie p no.2' => 'serie p no.2',
+           'siglo i' => 'siglo i',
+           'siglo 1' => 'siglo i',
+           'sig i' => 'siglo i',
+           'sig 1' => 'siglo i',
+           'siglo ii' => 'siglo ii',
+           'siglo 2' => 'siglo ii',
+           'sig ii' => 'siglo ii',
+           'sig 2' => 'siglo ii',
+           'siglo iii' => 'siglo iii',
+           'siglo 3' => 'siglo iii',
+           'sig iii' => 'siglo iii',
+           'sig 3' => 'siglo iii',
+           'siglo iv' => 'siglo iv',
+           'siglo 4' => 'siglo iv',
+           'sig iv' => 'siglo iv',
+           'sig 4' => 'siglo iv',
+           'siglo v' => 'siglo v',
+           'siglo 5' => 'siglo v',
+           'sig v' => 'siglo v',
+           'sig 5' => 'siglo v',
+           'siglo vi' => 'siglo vi',
+           'siglo 6' => 'siglo vi',
+           'sig vi' => 'siglo vi',
+           'sig 6' => 'siglo vi',
+           'behike 52' => 'behike 52',
+           'bhk 52' => 'behike 52',
+           'bhk52' => 'behike 52',
+           'bk 52' => 'behike 52',
+           'bk52' => 'behike 52',
+           'behike 54' => 'behike 54',
+           'bhk 54' => 'behike 54',
+           'bhk54' => 'behike 54',
+           'bk 54' => 'behike 54',
+           'bk54' => 'behike 54',
+           'behike 56' => 'behike 56',
+           'bhk 56' => 'behike 56',
+           'bhk56' => 'behike 56',
+           'bk 56' => 'behike 56',
+           'bk56' => 'behike 56',
+           'no. 1' => 'no.1',
+           'number 1' => 'no.1',
+           'numero 1' => 'no.1',
+           'num 1' => 'no.1',
+           'no1' => 'no.1',
+           '#1' => 'no.1',
+           'no. 2' => 'no.2',
+           'number 2' => 'no.2',
+           'numero 2' => 'no.2',
+           'num 2' => 'no.2',
+           'no2' => 'no.2',
+           '#2' => 'no.2',
+           'no. 3' => 'no.3',
+           'number 3' => 'no.3',
+           'numero 3' => 'no.3',
+           'num 3' => 'no.3',
+           'no3' => 'no.3',
+           '#3' => 'no.3',
+           'no. 4' => 'no.4',
+           'number 4' => 'no.4',
+           'numero 4' => 'no.4',
+           'num 4' => 'no.4',
+           'no4' => 'no.4',
+           '#4' => 'no.4',
+           'no. 5' => 'no.5',
+           'number 5' => 'no.5',
+           'numero 5' => 'no.5',
+           'num 5' => 'no.5',
+           'no5' => 'no.5',
+           '#5' => 'no.5',
+           'petit edmundo' => 'petit edmundo',
+           'pe' => 'petit edmundo',
+           'petite edmundo' => 'petit edmundo',
+           'pt edmundo' => 'petit edmundo',
+           'edmundo' => 'edmundo',
+           'edm' => 'edmundo',
+           'double edmundo' => 'double edmundo',
+           'dbl edmundo' => 'double edmundo',
+           'doble edmundo' => 'double edmundo',
+           'edm dbl' => 'double edmundo',
+           'grand edmundo' => 'double edmundo',
+           'magnum 46' => 'magnum 46',
+           'mag 46' => 'magnum 46',
+           'magnum46' => 'magnum 46',
+           'mag46' => 'magnum 46',
+           'h upmann mag 46' => 'magnum 46',
+           'upmann magnum 46' => 'magnum 46',
+         'magnum 50' => 'magnum 50',
+           'mag 50' => 'magnum 50',
+           'magnum50' => 'magnum 50',
+           'mag50' => 'magnum 50',
+           'h upmann mag 50' => 'magnum 50',
+           'upmann magnum 50' => 'magnum 50',
+           'epicure no. 1' => 'epicure no.1',
+           'epi 1' => 'epicure no.1',
+           'epicure 1' => 'epicure no.1',
+           'epi1' => 'epicure no.1',
+           'hdm epi 1' => 'epicure no.1',
+           'epicure no. 2' => 'epicure no.2',
+           'epi 2' => 'epicure no.2',
+           'epicure 2' => 'epicure no.2',
+           'epi2' => 'epicure no.2',
+           'hdm epi 2' => 'epicure no.2',
+           'royal corona' => 'royal coronas',
+           'rc' => 'royal coronas',
+           'bolivar rc' => 'royal coronas',
+           'royal coronas' => 'royal coronas',
+           'brc' => 'royal coronas',
+           'belicosos finos' => 'belicosos finos',
+           'bf' => 'belicosos finos',
+           'bolivar bf' => 'belicosos finos',
+           'bbf' => 'belicosos finos',
+           'specially selected' => 'specially selected',
+           'ss' => 'specially selected',
+           'rass' => 'specially selected',
+           'ramon allones ss' => 'specially selected',
+       ];
+
+       // Initialize translation mapping for common cigar terms
+       $this->translation_mapping = [
+           // Brand translations
+           '柯伊巴' => 'cohiba',
+           '高希霸' => 'cohiba',
+           '哥希巴' => 'cohiba',
+           '科伊巴' => 'cohiba',
+           '科希巴' => 'cohiba',
+           '蒙特克里斯托' => 'montecristo',
+           '蒙特' => 'montecristo',
+           '蒙特克里图' => 'montecristo',
+           '蒙特克里斯多' => 'montecristo',
+           '蒙德克里' => 'montecristo',
+           '罗密欧朱丽叶' => 'romeo y julieta',
+           '罗密欧' => 'romeo y julieta',
+           '罗密欧与朱丽叶' => 'romeo y julieta',
+           '罗密欧和朱丽叶' => 'romeo y julieta',
+           '罗密欧朱丽叶特' => 'romeo y julieta',
+           '帕特加斯' => 'partagas',
+           '百德加斯' => 'partagas',
+           '帕塔加斯' => 'partagas',
+           '巴塔加斯' => 'partagas',
+           '帕特加' => 'partagas',
+           '霍约德蒙特雷' => 'hoyo de monterrey',
+           '蒙特雷' => 'hoyo de monterrey',
+           '何塞蒙特雷' => 'hoyo de monterrey',
+           '何友蒙特雷' => 'hoyo de monterrey',
+           '霍约·德·蒙特雷伊' => 'hoyo de monterrey',
+           '亨利乌普曼' => 'h. upmann',
+           '乌普曼' => 'h. upmann',
+           '玻利瓦尔' => 'bolivar',
+           '玻利瓦' => 'bolivar',
+           '博利瓦' => 'bolivar',
+           '玻利华' => 'bolivar',
+           '潘趣' => 'punch',
+           '朋驰' => 'punch',
+           '雷蒙艾罗尼' => 'ramon allones',
+           '雷蒙' => 'ramon allones',
+           '雷蒙艾利尼' => 'ramon allones',
+           '特立尼达' => 'trinidad',
+           '特多里尼达' => 'trinidad',
+           '雷恩' => 'el rey del mundo',
+           '雷恩德尔曼多' => 'el rey del mundo',
+           '世界之王' => 'el rey del mundo',
+           '圣克里斯托瓦尔' => 'san cristobal de la habana',
+           '圣克里斯托巴尔' => 'san cristobal de la habana',
+           '圣克里斯托' => 'san cristobal de la habana',
+           '码头' => 'quai dorsay',
+           '奥赛码头' => 'quai dorsay',
+           '多尔赛码头' => 'quai dorsay',
+           '多赛码头' => 'quai dorsay',
+           '古巴荣耀' => 'la gloria cubana',
+           '拉格洛丽亚古巴纳' => 'la gloria cubana',
+           '拉哥利亚' => 'la gloria cubana',
+           '何塞皮埃德拉' => 'jose l. piedra',
+           '荷塞' => 'jose l. piedra',
+           '皮埃德拉' => 'jose l. piedra',
+           '丰塞卡' => 'fonseca',
+           '丰赛卡' => 'fonseca',
+           '胡安洛佩兹' => 'juan lopez',
+           '胡安·洛佩兹' => 'juan lopez',
+           '胡安罗佩斯' => 'juan lopez',
+           '桑乔潘莎' => 'sancho panza',
+           '桑丘潘莎' => 'sancho panza',
+           '拉斐尔冈萨雷斯' => 'rafael gonzalez',
+           '拉斐尔' => 'rafael gonzalez',
+           '拉斐尔·冈萨雷斯' => 'rafael gonzalez',
+           '保拉纳加' => 'por larranaga',
+           '拉腊纳加' => 'por larranaga',
+           '外交官' => 'diplomáticos',
+           '迪普洛马蒂克斯' => 'diplomáticos',
+           '卡诺之花' => 'la flor de cano',
+           '卡诺花' => 'la flor de cano',
+           '昆特罗' => 'quintero',
+           '维格罗斯' => 'vegueros',
+           '韦格罗斯' => 'vegueros',
+           '库阿巴' => 'cuaba',
+           '古阿巴' => 'cuaba',
+           '库夸巴' => 'cuaba',
+           '阿图罗富恩特' => 'arturo fuente',
+           '富恩特' => 'arturo fuente',
+           '帕德龙' => 'padron',
+           '帕德隆' => 'padron',
+           '帕德伦' => 'padron',
+           '大卫杜夫' => 'davidoff',
+           '大卫·杜夫' => 'davidoff',
+           '我的父亲' => 'my father',
+           '奥利瓦' => 'oliva',
+           '奥利维亚' => 'oliva',
+           '德鲁庄园' => 'drew estate',
+           '德鲁' => 'drew estate',
+           '阿什顿' => 'ashton',
+           '古巴的香气' => 'la aroma de cuba',
+           '古巴香气' => 'la aroma de cuba',
+           '佩尔多莫' => 'perdomo',
+           '珀多莫' => 'perdomo',
+           '洛基帕特尔' => 'rocky patel',
+           '洛基·帕特尔' => 'rocky patel',
+           '多米尼加之花' => 'la flor dominicana',
+           '多米尼加娜' => 'la flor dominicana',
+           '陈年室' => 'aging room',
+           '陈化室' => 'aging room',
+           '亚历克布拉德利' => 'alec bradley',
+           '亚历克·布拉德利' => 'alec bradley',
+           '卡马乔' => 'camacho',
+           'aj费尔南德斯' => 'aj fernandez',
+           'aj·费尔南德斯' => 'aj fernandez',
+           '加冕之首' => 'crowned heads',
+           '皇冠头' => 'crowned heads',
+           '幻象' => 'illusione',
+           '伊露希恩' => 'illusione',
+           '尼加拉瓜的珠宝' => 'joya de nicaragua',
+           '尼加拉瓜珠宝' => 'joya de nicaragua',
+           '普拉森西亚' => 'plasencia',
+           '基础' => 'foundation',
+           '基金会' => 'foundation',
+           '考德威尔' => 'caldwell',
+           '沃普德' => 'warped',
+           '变形' => 'warped',
+           '纹身' => 'tatuaje',
+           '塔图哈' => 'tatuaje',
+           '私人联盟' => 'liga privada',
+           '私人联赛' => 'liga privada',
+           '作品x' => 'opus x',
+           '费尔南德斯之家' => 'casa fernandez',
+           '新世界' => 'new world',
+           '纳特舍曼' => 'nat sherman',
+           '纳特·舍曼' => 'nat sherman',
+           '马卡努多' => 'macanudo',
+           '蒙特克里斯托(非古巴)' => 'montecristo (non-cuban)',
+           '蒙特克里斯托（非古巴）' => 'montecristo (non-cuban)',
+           '罗密欧朱丽叶(非古巴)' => 'romeo y julieta (non-cuban)',
+           '罗密欧朱丽叶（非古巴）' => 'romeo y julieta (non-cuban)',
+           '帕特加斯(非古巴)' => 'partagas (non-cuban)',
+           '帕特加斯（非古巴）' => 'partagas (non-cuban)',
+           '霍约德蒙特雷(非古巴)' => 'hoyo de monterrey (non-cuban)',
+           '霍约德蒙特雷（非古巴）' => 'hoyo de monterrey (non-cuban)',
+           '亨利乌普曼(非古巴)' => 'h. upmann (non-cuban)',
+           '亨利乌普曼（非古巴）' => 'h. upmann (non-cuban)',
+           '潘趣(非古巴)' => 'punch (non-cuban)',
+           '潘趣（非古巴）' => 'punch (non-cuban)',
+           '圣洛塔诺' => 'san lotano',
+           '柯伊巴尼加拉瓜' => 'cohiba nicaragua',
+           '高希霸尼加拉瓜' => 'cohiba nicaragua',
+           '柯伊巴多米尼加' => 'cohiba dominican',
+           '高希霸多米尼加' => 'cohiba dominican',
+           '圣克里斯托瓦尔(非古巴)' => 'san cristobal (nc)',
+           '圣克里斯托瓦尔（非古巴）' => 'san cristobal (nc)',
+           '埃雷拉埃斯特利' => 'herrera esteli',
+           '皇冠之下' => 'undercrown',
+           '皇冠底下' => 'undercrown',
+           '该隐' => 'cain',
+           '凯恩' => 'cain',
+           '唐卡洛斯' => 'don carlos',
+           '唐·卡洛斯' => 'don carlos',
+           '海明威' => 'hemingway',
+           '富恩特富恩特' => 'fuente fuente',
+           '火神' => 'god of fire',
+           '安尼约' => 'anejo',
+           '帕德龙周年' => 'padron anniversary',
+           '帕德龙周年纪念' => 'padron anniversary',
+           'e.p.卡里略' => 'e.p. carrillo',
+           '拉帕利纳' => 'la palina',
+           '莱西亚' => 'leccia',
+           '卡奥' => 'cao',
+           '廓尔喀' => 'gurkha',
+           '古尔卡' => 'gurkha',
+           '弗拉特洛' => 'fratello',
+           '弗拉特罗' => 'fratello',
+           '孟买' => 'mbombay',
+           '罗马手工' => 'roma craft',
+           '塞里诺' => 'serino',
+           '登巴顿烟草与信托' => 'dunbarton tobacco & trust',
+           '库里瓦里' => 'curivari',
+           '奥斯卡之叶' => 'leaf by oscar',
+           '阿加诺萨叶' => 'aganorsa leaf',
+           '骑士' => 'cavalier',
+           '十字架' => 'crux',
+           '埃罗亚' => 'eiroa',
+           '埃斯皮诺萨' => 'espinosa',
+           '霍约友谊' => 'hoyo la amistad',
+           '拉兰加' => 'laranja',
+           '内斯特米兰达' => 'nestor miranda',
+           '内斯特·米兰达' => 'nestor miranda',
+           '雷吉乌斯' => 'regius',
+           '101室' => 'room101',
+           '奎萨达' => 'quesada',
+           '维亚赫' => 'viaje',
+           '旅行' => 'viaje',
+           '齐诺' => 'zino',
+           '拉奥罗拉' => 'la aurora',
+           '科尼利厄斯与安东尼' => 'cornelius & anthony',
+           '历史' => 'la historia',
+           '山谷之花' => 'flor del valle',
+           '每一天' => 'todos las dias',
+           '不妥协' => 'sin compromiso',
+           '餐后' => 'sobremesa',
+           '帐幕' => 'the tabernacle',
+           '圣殿' => 'the tabernacle',
+           '海克利尔城堡' => 'highclere castle',
+           '国王驾崩' => 'the king is dead',
+           '四踢' => 'four kicks',
+           '皇后' => 'la imperiosa',
+           
+           // Series translations
+           '世纪' => 'siglo',
+           '西格洛' => 'siglo',
+           '贝希克' => 'behike',
+           '贝伊克' => 'behike',
+           '马杜罗' => 'maduro',
+           '罗布图' => 'robusto',
+           '罗布斯图' => 'robusto',
+           '特长雪茄' => 'esplendidos',
+           '光辉' => 'esplendidos',
+           '辉煌' => 'esplendidos',
+           '兰塞罗' => 'lanceros',
+           '长棒' => 'lanceros',
+           '金字塔' => 'piramides',
+           '精美' => 'exquisitos',
+           '精致' => 'exquisitos',
+           '小潘纳' => 'panetelas',
+           '特制皇冠' => 'coronas especiales',
+           '天才' => 'genios',
+           '秘密' => 'secretos',
+           '魔术师' => 'magicos',
+           '健壮' => 'robustos',
+           '1492系列' => 'linea 1492',
+           '经典系列' => 'linea clasica',
+           '护身符' => 'talismán',
+           '1号' => 'no.1',
+           '一号' => 'no.1',
+           '2号' => 'no.2',
+           '二号' => 'no.2',
+           '3号' => 'no.3',
+           '三号' => 'no.3',
+           '4号' => 'no.4',
+           '四号' => 'no.4',
+           '5号' => 'no.5',
+           '五号' => 'no.5',
+           '小爱德蒙' => 'petit edmundo',
+           '小蒙特' => 'petit edmundo',
+           '爱德蒙' => 'edmundo',
+           '爱德蒙多' => 'edmundo',
+           '双爱德蒙' => 'double edmundo',
+           '双爱德蒙多' => 'double edmundo',
+           '小2号' => 'petit no.2',
+           '小二号' => 'petit no.2',
+           '少年' => 'junior',
+           '小宝石' => 'joyitas',
+           '特别' => 'especial',
+           '特别1号' => 'especial no.1',
+           '特别一号' => 'especial no.1',
+           '特别2号' => 'especial no.2',
+           '特别二号' => 'especial no.2',
+           '鹰' => 'eagle',
+           '开放鹰' => 'open eagle',
+           '开放大师' => 'open master',
+           '开放少年' => 'open junior',
+           '开放赛艇' => 'open regata',
+           '大仲马' => 'dumas',
+           '半皇冠' => 'media corona',
+           '1935系列' => 'linea 1935',
+           '马尔他骑士' => 'maltes',
+           '传奇' => 'leyenda',
+           '但丁' => 'dantes',
+           '但体' => 'dantes',
+           '丘吉尔' => 'churchill',
+           '宽丘吉尔' => 'wide churchill',
+           '短丘吉尔' => 'short churchill',
+           '小丘吉尔' => 'petit churchill',
+           '鱼雷' => 'belicoso',
+           '美景宫' => 'belvedere',
+           '猎人' => 'cazadores',
+           '豪华雪松' => 'cedros de luxe',
+           '豪华雪松1号' => 'cedros de luxe no.1',
+           '豪华雪松一号' => 'cedros de luxe no.1',
+           '豪华雪松2号' => 'cedros de luxe no.2',
+           '豪华雪松二号' => 'cedros de luxe no.2',
+           '豪华雪松3号' => 'cedros de luxe no.3',
+           '豪华雪松三号' => 'cedros de luxe no.3',
+           '雪松皇冠' => 'coronitas en cedro',
+           '展览3号' => 'exhibition no.3',
+           '展览三号' => 'exhibition no.3',
+           '展览4号' => 'exhibition no.4',
+           '展览四号' => 'exhibition no.4',
+           '千花' => 'mille fleurs',
+           '小朱丽叶' => 'petit julieta',
+           '小皇家' => 'petit royales',
+           '小纯' => 'puritos',
+           '伦敦盛宴' => 'regalias de londres',
+           '运动加长' => 'sports largos',
+           '墨西哥卷' => 'tacos',
+           '金系列' => 'linea de oro',
+           '贵族' => 'nobles',
+           '戴安娜' => 'dianas',
+           'd系列' => 'serie d',
+           'd系列4号' => 'serie d no.4',
+           'd系列四号' => 'serie d no.4',
+           'd系列5号' => 'serie d no.5',
+           'd系列五号' => 'serie d no.5',
+           'd系列6号' => 'serie d no.6',
+           'd系列六号' => 'serie d no.6',
+           'e系列' => 'serie e',
+           'e系列2号' => 'serie e no.2',
+           'e系列二号' => 'serie e no.2',
+           'p系列' => 'serie p',
+           'p系列2号' => 'serie p no.2',
+           'p系列二号' => 'serie p no.2',
+           '卢西塔尼亚' => 'lusitanias',
+           '胖皇冠' => 'coronas gordas',
+           '少年皇冠' => 'coronas junior',
+           '三蛇' => 'culebras',
+           '哈瓦那' => 'habaneros',
+           '特制小皇冠' => 'petit coronas especiales',
+           '短' => 'shorts',
+           '超级帕特加斯' => 'super partagas',
+           '马杜罗1号' => 'maduro no.1',
+           '马杜罗一号' => 'maduro no.1',
+           '马杜罗2号' => 'maduro no.2',
+           '马杜罗二号' => 'maduro no.2',
+           '马杜罗3号' => 'maduro no.3',
+           '马杜罗三号' => 'maduro no.3',
+           '私人精选' => 'seleccion privada',
+           '总统' => 'presidentes',
+           '首都' => 'capitols',
+           '鉴赏家系列' => 'serie du connaisseur',
+           '皇冠' => 'coronas',
+           '美食家' => 'epicure',
+           '美食家1号' => 'epicure no.1',
+           '美食家一号' => 'epicure no.1',
+           '美食家2号' => 'epicure no.2',
+           '美食家二号' => 'epicure no.2',
+           '特别美食家' => 'epicure especial',
+           '豪华美食家' => 'epicure deluxe',
+           '小罗布图' => 'petit robusto',
+           '双皇冠' => 'double coronas',
+           '众神' => 'le hoyo des dieux',
+           '市长' => 'le hoyo du maire',
+           '议员' => 'le hoyo du depute',
+           '圣胡安' => 'le hoyo de san juan',
+           '洞' => 'le hoyo',
+           '额外棕榈' => 'palmas extra',
+           '加冕' => 'coronations',
+           '礼物' => 'regalos',
+           '干河' => 'rio seco',
+           '短霍约' => 'short hoyo',
+           '美丽4号' => 'hermosos no.4',
+           '美丽四号' => 'hermosos no.4',
+           '马格纳姆46' => 'magnum 46',
+           '大酒瓶46' => 'magnum 46',
+           '马格纳姆50' => 'magnum 50',
+           '大酒瓶50' => 'magnum 50',
+           '马格纳姆54' => 'magnum 54',
+           '大酒瓶54' => 'magnum 54',
+           '马格纳姆56' => 'magnum 56',
+           '大酒瓶56' => 'magnum 56',
+           '鉴赏家' => 'connossieur',
+           '鉴赏家a' => 'connossieur a',
+           '鉴赏家1号' => 'connossieur no.1',
+           '鉴赏家一号' => 'connossieur no.1',
+           '鉴赏家2号' => 'connossieur no.2',
+           '鉴赏家二号' => 'connossieur no.2',
+           '半皇冠' => 'half corona',
+           '少年皇冠' => 'coronas junior',
+           '主要皇冠' => 'coronas major',
+           '皇家' => 'regalias',
+           '小皇冠' => 'petit coronas',
+           '雄伟' => 'majestic',
+           '君王' => 'monarch',
+           '温斯顿爵士' => 'sir winston',
+           '皇家罗布图' => 'royal robusto',
+           '专属' => 'propios',
+           '小乌普曼' => 'petit upmann',
+           '诺艾拉斯' => 'noellas',
+           '皇家皇冠' => 'royal coronas',
+           '精制鱼雷' => 'belicosos finos',
+           '管装1号' => 'tubos no.1',
+           '管装一号' => 'tubos no.1',
+           '管装2号' => 'tubos no.2',
+           '管装二号' => 'tubos no.2',
+           '管装3号' => 'tubos no.3',
+           '管装三号' => 'tubos no.3',
+           '巨型皇冠' => 'corona gigantes',
+           '额外皇冠' => 'coronas extra',
+           '金牌' => 'gold medal',
+           '解放者' => 'libertador',
+           '小鱼雷' => 'petit belicosos',
+           '君主' => 'soberano',
+           '地区版' => 'regionales',
+           '不列颠' => 'britanicas',
+           '美丽' => 'hermosos',
+           '潘趣潘趣' => 'punch punch',
+           '皇家加冕' => 'royal coronation',
+           '小加冕' => 'petit coronations',
+           '皇家精选11号' => 'royal selection no.11',
+           '皇家精选十一号' => 'royal selection no.11',
+           '皇家精选12号' => 'royal selection no.12',
+           '皇家精选十二号' => 'royal selection no.12',
+           '小潘趣' => 'petit punch',
+           '超级精选1号' => 'super selection no.1',
+           '超级精选一号' => 'super selection no.1',
+           '超级精选2号' => 'super selection no.2',
+           '超级精选二号' => 'super selection no.2',
+           '48号' => '48',
+           '49号' => '49',
+           '50号' => '50',
+           '55号' => '55',
+           '57号' => '57',
+           '短潘趣' => 'short de punch',
+           '特别精选' => 'specially selected',
+           '小俱乐部皇冠' => 'small club coronas',
+           '巨人' => 'gigantes',
+           '高级' => 'superiores',
+           '特级' => 'extra',
+           '亨特和弗兰考' => 'hunters & frankau',
+           '俱乐部艾罗尼' => 'club allones',
+           '艾罗尼特级' => 'allones extra',
+           '艾罗尼高级' => 'allones superiores',
+           '创始人' => 'fundadores',
+           '殖民地' => 'coloniales',
+           '国王' => 'reyes',
+           '瞭望' => 'vigia',
+           '半月' => 'media luna',
+           '顶部' => 'topes',
+           '翠绿宝石' => 'esmeralda',
+           '游吟诗人' => 'la trova',
+           '至尊精选' => 'choix supreme',
+           '小杯' => 'demi tasse',
+           '西班牙大公' => 'grandes de espana',
+           '塔伊诺人' => 'tainos',
+           '时代' => 'l\'epoque',
+           '晨餐俱乐部' => 'lunch club',
+           '力量' => 'la fuerza',
+           '尖点' => 'la punta',
+           '塔楼' => 'torreon',
+           '工艺' => 'oficios',
+           '商人' => 'mercaderes',
+           '城墙' => 'muralla',
+           '城堡' => 'el morro',
+           '五十号' => 'no.50',
+           '54号' => 'no.54',
+           '五十四号' => 'no.54',
+           '明亮皇冠' => 'corona claro',
+           '帝国' => 'imperiales',
+           '参议员' => 'senadores',
+           '金牌1号' => 'medaille d\'or no.1',
+           '金牌一号' => 'medaille d\'or no.1',
+           '金牌2号' => 'medaille d\'or no.2',
+           '金牌二号' => 'medaille d\'or no.2',
+          '金牌3号' => 'medaille d\'or no.3',
+           '金牌三号' => 'medaille d\'or no.3',
+           '金牌4号' => 'medaille d\'or no.4',
+           '金牌四号' => 'medaille d\'or no.4',
+           '光荣' => 'gloriosos',
+           '巨大' => 'inmensa',
+           '猎人' => 'cazadores',
+           '保存' => 'conservas',
+           '无花果' => 'brevas',
+           '小猎人' => 'petit cazadores',
+           '国民' => 'nacionales',
+           '小权杖' => 'petit cetros',
+           '哥萨克' => 'cosacos',
+           '美味' => 'delicias',
+           '学员' => 'kadetes',
+           '精选1号' => 'seleccion no.1',
+           '精选一号' => 'seleccion no.1',
+           '精选2号' => 'seleccion no.2',
+           '精选二号' => 'seleccion no.2',
+           '无与伦比' => 'non plus',
+           '风车' => 'molinos',
+           '桑乔' => 'sanchos',
+           '巨型皇冠' => 'coronas gigantes',
+           '珍珠' => 'perlas',
+           '额外皇冠' => 'coronas extra',
+           '额外小潘' => 'panetelas extra',
+           '蒙特卡洛' => 'montecarlos',
+           '英俊' => 'galanes',
+           '斗牛士' => 'picadores',
+           '卓越' => 'excelencia',
+           '武士道' => 'bushido',
+           '弹药' => 'ammunition',
+           '精选' => 'selectos',
+           '大卡诺' => 'gran cano',
+           '最爱' => 'favoritos',
+           '伦敦特级' => 'londres extra',
+           '小昆特罗' => 'petit quinteros',
+           '中心精致' => 'centrofinos',
+           '间隔时间' => 'entretiempos',
+           '覆盖' => 'tapados',
+           '早晨' => 'mananitas',
+           '马雷瓦' => 'mareva',
+           '杰出' => 'distinguidos',
+           '王冠' => 'diademas',
+           '大方' => 'generosos',
+           '所罗门' => 'salomones',
+           '传统' => 'tradicionales',
+           '神圣' => 'divinos',
+           '作品x' => 'opus x',
+           '海明威' => 'hemingway',
+           '唐卡洛斯' => 'don carlos',
+           '陈年' => 'anejo',
+           '富恩特城堡' => 'chateau fuente',
+           '卷发头' => 'curly head',
+           '特级珍藏' => 'gran reserva',
+           '古巴之家' => 'casa cuba',
+           '大炮' => 'canones',
+           '精致之花8-5-8' => 'flor fina 8-5-8',
+           '粉红' => 'rosado',
+           '马格南r' => 'magnum r',
+           '短篇小说' => 'short story',
+           '言外之意' => 'between the lines',
+           '世纪命运' => 'destino al siglo',
+           '稀有粉红' => 'rare pink',
+           '鲨鱼' => 'shark',
+           '国王力量' => 'king power',
+           '鲨鱼之眼' => 'eye of the shark',
+           '作品x二十周年' => 'opus x 20th anniversary',
+           '稀有黑' => 'rare black',
+           '1964周年' => '1964 anniversary',
+           '1964周年纪念' => '1964 anniversary',
+           '1926系列' => '1926 series',
+           '家族珍藏' => 'family reserve',
+           '达马索' => 'damaso',
+           '自然' => 'natural',
+           '2000' => '2000',
+           '二千' => '2000',
+           '3000' => '3000',
+           '三千' => '3000',
+           '4000' => '4000',
+           '四千' => '4000',
+           '5000' => '5000',
+           '五千' => '5000',
+           '6000' => '6000',
+           '六千' => '6000',
+           '7000' => '7000',
+           '七千' => '7000',
+           '80年' => '80 years',
+           '八十年' => '80 years',
+           '50年' => '50 years',
+           '五十年' => '50 years',
+           '45年' => '45 years',
+           '四十五年' => '45 years',
+           '40年' => '40 years',
+           '四十年' => '40 years',
+           '88号' => 'no.88',
+           '八十八号' => 'no.88',
+           '90号' => 'no.90',
+           '九十号' => 'no.90',
+           '专属' => 'exclusivo',
+           '签名' => 'signature',
+           '特级酒' => 'grand cru',
+           '周年' => 'aniversario',
+           '千禧混合' => 'millennium blend',
+           '尼加拉瓜' => 'nicaragua',
+           '科罗拉多克拉罗' => 'colorado claro',
+           '神秘' => 'escurio',
+           '山麻萨' => 'yamasa',
+           '皇家发行' => 'royal release',
+           '第一' => 'primeros',
+           '特别' => 'special',
+           '温斯顿丘吉尔' => 'winston churchill',
+           '深夜' => 'late hour',
+           '主厨版' => 'chef\'s edition',
+           '杰作' => 'masterpiece',
+           '特殊t' => 'special t',
+           '双r' => 'double r',
+           '特殊r' => 'special r',
+           '幕间' => 'entreacto',
+           '纯金' => 'puro d\'oro',
+           '珠宝' => 'le bijou',
+           '富裕' => 'la opulencia',
+           '法官' => 'the judge',
+           '加西亚与加西亚' => 'garcia & garcia',
+           '传奇' => 'the legend',
+           '唐佩平' => 'don pepin',
+           '大优惠' => 'la gran oferta',
+           '安的列斯之花' => 'flor de las antillas',
+           '承诺' => 'la promesa',
+           '古老' => 'la antiguedad',
+           '百夫长' => 'centurion',
+           '海梅加西亚' => 'jaime garcia',
+           '古巴维加斯' => 'vegas cubanas',
+           '百夫长h-2k-ct' => 'el centurion h-2k-ct',
+           'v系列' => 'serie v',
+           'v系列梅拉尼奥' => 'serie v melanio',
+           'g系列' => 'serie g',
+           'o系列' => 'serie o',
+           '大师混合' => 'master blends',
+           '小块' => 'nub',
+           '康涅狄格珍藏' => 'connecticut reserve',
+           '吉尔伯特奥利瓦' => 'gilberto oliva',
+           '小块哈瓦那' => 'nub habano',
+           '小块喀麦隆' => 'nub cameroon',
+           '小块康涅狄格' => 'nub connecticut',
+           '小块马杜罗' => 'nub maduro',
+           '该隐f' => 'cain f',
+           '该隐马杜罗' => 'cain maduro',
+           '该隐代托纳' => 'cain daytona',
+           '私人联盟' => 'liga privada',
+           '私人联盟9号' => 'liga privada no.9',
+           '私人联盟九号' => 'liga privada no.9',
+           '私人联盟t52' => 'liga privada t52',
+           '皇冠之下' => 'undercrown',
+           '皇冠之下日影' => 'undercrown shade',
+           '皇冠之下马杜罗' => 'undercrown maduro',
+           '皇冠之下日晒' => 'undercrown sun grown',
+           '酸' => 'acid',
+           '酸金发' => 'acid blondie',
+           '酸古巴古巴' => 'acid kuba kuba',
+           '埃雷拉埃斯特利' => 'herrera esteli',
+           '埃雷拉埃斯特利北方' => 'herrera esteli norteno',
+           '埃雷拉埃斯特利巴西马杜罗' => 'herrera esteli brazilian maduro',
+           '佛罗里达日晒' => 'florida sun grown',
+           '独特系列' => 'unico serie',
+           '飞猪' => 'flying pig',
+           '肮脏老鼠' => 'dirty rat',
+           '野性飞猪' => 'feral flying pig',
+           '薯条' => 'papas fritas',
+           '天鹅绒老鼠' => 'velvet rat',
+           '大老鼠' => 'ratzilla',
+           '肮脏薯条' => 'nasty fritas',
+           '鼠年' => 'year of the rat',
+           '爪哇' => 'java',
+           '太阳岛' => 'isla del sol',
+           '特别烟草' => 'tabak especial',
+           '枯木' => 'deadwood',
+           '尼加乡村' => 'nica rustica',
+           '拉鲁坦' => 'larutan',
+           '帕皮范温克尔' => 'pappy van winkle',
+           '巴伐利亚' => 'bavarian',
+           '经典' => 'classic',
+           '内阁' => 'cabinet',
+           '陈年马杜罗' => 'aged maduro',
+           '传承纯太阳' => 'heritage puro sol',
+           '对称' => 'symmetry',
+           '天堂' => 'paradiso',
+           '白金' => 'platinum',
+           '白' => 'white',
+           '剑' => 'espada',
+           '史诗' => 'epic',
+           '工匠系列' => 'artisan series',
+           '蒙特' => 'monte',
+           '飞行员' => 'pilotico',
+           'aj费尔南德斯制作' => 'crafted by aj fernandez',
+           '尼加拉瓜系列' => 'nicaragua series',
+           '史诗工艺熟成' => 'epic craft cured',
+           '1935系列' => 'linea 1935',
+           '黑剑' => 'espada oscuro',
+           '史诗蓝' => 'epic blue',
+           '史诗红' => 'epic red',
+       
+		   '传承系列' => 'heritage series',
+     ]
+		   
+	   ]; // Close the cigar_series array here
+
+       // Initialize common packaging terms
+       $this->packaging_patterns = [
+           '多米尼加' => 'dominican',
+           '康涅狄格' => 'connecticut',
+           '洪都拉斯' => 'honduras',
+           '巴西' => 'brazil',
+           '厄瓜多尔' => 'ecuador',
+           '苏门答腊' => 'sumatra',
+           '哈巴诺' => 'habano',
+           '喀麦隆' => 'cameroon',
+           '科罗霍' => 'corojo',
+           '克里奥罗' => 'criollo',
+           '奥斯库罗' => 'oscuro',
+           '戈尔迪托' => 'gordito',
+           '精选' => 'seleccion',
+           '珍藏' => 'reserva',
+           '限量版' => 'limited edition',
+           '限量' => 'limited',
+           '地区版' => 'regional edition',
+           '皇冠' => 'corona',
+           '罗布图' => 'robusto',
+           '鱼雷' => 'torpedo',
+           '长棒' => 'lancero',
+           '丘吉尔' => 'churchill',
+           '小皇冠' => 'petit corona',
+           '双皇冠' => 'double corona',
+           '潘纳' => 'panetela',
+           '小潘纳' => 'petit panetela',
+           '金字塔' => 'piramide',
+           '完美' => 'perfecto',
+           '公牛' => 'toro',
+           '朗斯代尔' => 'lonsdale',
+           '瘦朗斯代尔' => 'slim lonsdale',
+           '肥朗斯代尔' => 'fat lonsdale',
+           
+           // Packing related terms
+           '盒' => 'box',
+           '箱' => 'box',
+           '柜' => 'cabinet',
+           '木盒' => 'cabinet',
+           '罐' => 'jar',
+           '陶罐' => 'jar',
+           '包' => 'pack',
+           '小包' => 'pack',
+           '捆' => 'bundle',
+           '束' => 'bundle',
+           '锡盒' => 'tin',
+           '铁盒' => 'tin',
+           '管装' => 'tubos',
+           '纸盒' => 'carton',
+           '样品盒' => 'sampler',
+           '滑盖盒' => 'slide lid box',
+           '礼盒' => 'dress box',
+           '上漆盒' => 'varnished box',
+           '哑光盒' => 'matte box',
+           '半普通盒' => 'semi plain box',
+           '半自然盒' => 'semiboite nature',
+           '盒装' => 'box of',
+           '包装' => 'pack of',
+           '捆装' => 'bundle of',
+           '罐装' => 'jar of',
+           '锡盒装' => 'tin of',
+           '柜装' => 'cabinet of',
+           '纸盒装' => 'carton of',
+           '管装的' => 'tubos of',
+           '托盘' => 'tray',
+           '陶瓷罐' => 'ceramic jar',
+           '玻璃罐' => 'glass jar',
+           '保湿盒' => 'humidor',
+           '旅行保湿盒' => 'travel humidor',
+           '透明包装' => 'cello',
+           '补充装' => 'refill',
+           '礼品盒' => 'gift box',
+           '礼品包' => 'gift pack',
+           '礼品套装' => 'gift set',
+           '展示' => 'display',
+           
+           // Size/count related terms
+           '毫米' => 'mm',
+           '英寸' => 'inch',
+           '环规' => 'ring gauge',
+           'rg' => 'ring gauge',
+           '长度' => 'length',
+           '盒10支' => 'box of 10',
+           '盒20支' => 'box of 20',
+           '盒25支' => 'box of 25',
+           '盒50支' => 'box of 50',
+           '10支装' => 'box of 10',
+           '20支装' => 'box of 20',
+           '25支装' => 'box of 25',
+           '50支装' => 'box of 50',
+           '10支' => 'box of 10',
+           '20支' => 'box of 20',
+           '25支' => 'box of 25',
+           '50支' => 'box of 50',
+           '10根' => 'box of 10',
+           '20根' => 'box of 20',
+           '25根' => 'box of 25',
+           '50根' => 'box of 50',
+           '10条' => 'box of 10',
+           '20条' => 'box of 20',
+           '25条' => 'box of 25',
+           '50条' => 'box of 50',
+           
+           // Regional edition terms
+           '亚太' => 'asia pacific',
+           '英国' => 'uk',
+           '海峡群岛' => 'channel islands',
+           '西班牙' => 'espana',
+           '德国' => 'germany',
+           '比荷卢' => 'benelux',
+           '瑞士' => 'switzerland',
+           '安道尔' => 'andorra',
+           '意大利' => 'italy',
+           '法国' => 'france',
+           '加拿大' => 'canada',
+           '墨西哥' => 'mexico',
+           '古巴' => 'cuba',
+           '加勒比' => 'caribbean',
+           '中东' => 'middle east',
+           '亚洲' => 'asia',
+           '澳大利亚' => 'australia',
+           '中国' => 'china',
+           '香港' => 'hong kong',
+           '台湾' => 'taiwan',
+           '澳门' => 'macau',
+           '新加坡' => 'singapore',
+           '日本' => 'japan',
+           '俄罗斯' => 'russia',
+           '葡萄牙' => 'portugal',
+           '希腊' => 'greece',
+           '以色列' => 'israel',
+           '黎巴嫩' => 'lebanon',
+           '阿联酋' => 'united arab emirates',
+           '波罗的海' => 'baltics',
+           '北欧' => 'nordics',
+           '斯堪的纳维亚' => 'scandinavia',
+           '丹麦' => 'denmark',
+           '挪威' => 'norway',
+           '瑞典' => 'sweden',
+           '芬兰' => 'finland',
+           '太平洋' => 'pacific',
+           '亚得里亚海' => 'adriatic',
+       ];
+
+       // Terms to ignore when extracting keywords or matching
+       $this->ignored_terms = [
+           'cigar', 'cigars', '雪茄', 'habanos', '哈瓦那', 'havana', 'cuban', '古巴',
+           'genuine', 'authentic', 'original', '正品', '原装', '真品',
+           'official', 'certified', 'authorized', '官方', '认证', '授权',
+           'import', 'imported', 'duty', 'free', '进口', '免税',
+           'aged', 'aging', 'year', 'years', 'old', '陈年', '年份', '岁',
+           'hand', 'made', 'handmade', 'hand-made', 'handrolled', 'hand-rolled', '手工',
+           'premium', 'luxury', 'high', 'quality', 'finest', '高级', '奢华',
+           'new', 'arrival', 'available', 'in', 'stock', '新品', '到货', '有货',
+           'sale', 'deal', 'promotion', 'discount', 'special', 'offer', '特惠', '促销',
+           'shipping', 'ship', 'delivery', 'free', '运费', '快递', '包邮',
+           'price', 'cost', 'cheap', 'affordable', 'expensive', '价格', '实惠',
+           'buy', 'order', 'purchase', 'shopping', 'cart', '购买', '订购', '加购物车',
+           'shop', 'store', 'retail', 'wholesale', 'vendor', '商店', '零售', '批发',
+           'product', 'item', 'piece', 'unit', 'count', '商品', '单位', '支',
+           'flavor', 'taste', 'aroma', 'note', 'flavor', 'profile', '口味', '风味',
+           'review', 'rating', 'recommend', 'recommend', '评价', '评分', '推荐',
+           '公司', 'co.', 'ltd', '有限公司', '责任公司', 'inc', 'corporation',
+           'official', 'site', 'website', 'online', 'internet', '官网', '网站',
+           'home', 'page', 'category', 'menu', 'list', '首页', '分类', '菜单',
+           'contact', 'about', 'us', 'customer', 'service', '联系', '关于我们', '客服',
+           'login', 'register', 'account', 'member', 'profile', '登录', '注册',
+           'search', 'find', 'result', 'keyword', 'tag', '搜索', '查找', '关键词',
+           'add', 'to', 'shopping', 'cart', 'wishlist', 'favorite', '加入购物车',
+           'quantity', 'amount', 'piece', 'stick', 'select', '数量', '选择',
+           'desc', 'description', 'detail', 'specification', 'info', '描述', '详情',
+           'image', 'photo', 'picture', 'gallery', 'view', '图片', '照片', '查看',
+           'share', 'like', 'follow', 'social', 'media', '分享', '喜欢', '关注',
+           'payment', 'pay', 'method', 'credit', 'card', 'paypal', '支付',
+           'return', 'refund', 'exchange', 'warranty', 'guarantee', '退货', '保证',
+           'question', 'answer', 'faq', 'help', 'support', '问题', '帮助', '支持',
+           'blog', 'news', 'article', 'post', 'update', '博客', '新闻', '文章',
+           'video', 'tutorial', 'guide', 'how', 'to', 'learn', '视频', '教程',
+           'event', 'activity', 'promotion', 'campaign', 'special', '活动', '特别',
+           'vip', 'member', 'club', 'loyalty', 'program', '会员', '俱乐部',
+           'gift', 'present', 'souvenir', 'collection', '礼品', '礼物', '收藏',
+           'travel', 'tourism', 'vacation', 'holiday', 'trip', '旅行', '旅游',
+           'business', 'corporate', 'company', 'enterprise', 'firm', '商务', '企业',
+           'career', 'job', 'recruitment', 'hire', 'position', '招聘', '职位',
+           'legal', 'law', 'regulation', 'policy', 'term', '法律', '政策', '条款',
+           'privacy', 'security', 'safe', 'protection', 'private', '隐私', '安全',
+           'download', 'upload', 'file', 'document', 'attach', '下载', '上传', '文件',
+           'mail', 'email', 'newsletter', 'subscription', 'subscribe', '邮件', '订阅',
+           'message', 'comment', 'feedback', 'suggestion', 'opinion', '留言', '反馈',
+           'community', 'forum', 'discussion', 'topic', 'post', '社区', '论坛', '讨论',
+           'rank', 'top', 'list', 'best', 'popular', 'hot', '排名', '榜单', '热门',
+           'award', 'prize', 'win', 'winner', 'winning', 'reward', '奖项', '获奖',
+           'design', 'style', 'fashion', 'trend', 'modern', '设计', '风格', '时尚',
+           'classic', 'traditional', 'vintage', 'retro', 'old', '经典', '传统', '复古',
+           'luxury', 'premium', 'high-end', 'upscale', 'elite', '奢侈', '高端', '精英',
+           'low', 'budget', 'affordable', 'economy', 'cheap', '低价', '经济', '便宜',
+           'brand', 'name', 'label', 'trademark', 'logo', '品牌', '商标', '标志',
+           'custom', 'personalized', 'tailored', 'bespoke', 'unique', '定制', '个性化',
+           'standard', 'normal', 'regular', 'common', 'usual', '标准', '普通', '常规',
+           'special', 'specialty', 'specific', 'particular', 'certain', '特殊', '特别',
+           'size', 'dimension', 'measure', 'length', 'width', '尺寸', '长度', '宽度',
+           'color', 'shade', 'tone', 'hue', 'tint', '颜色', '色调', '色彩',
+           'material', 'fabric', 'texture', 'composition', 'element', '材料', '材质',
+           'gram', 'kilogram', 'pound', 'weight', 'heavy', 'light', '克', '公斤', '重量',
+           'meter', 'centimeter', 'millimeter', 'inch', 'foot', '米', '厘米', '毫米',
+           'code', 'number', 'serial', 'model', 'sku', 'barcode', '代码', '编号', '型号',
+           'function', 'feature', 'property', 'characteristic', 'attribute', '功能', '特点',
+           'use', 'usage', 'application', 'purpose', 'utility', '用途', '应用', '目的',
+           'effect', 'result', 'outcome', 'output', 'consequence', '效果', '结果', '后果',
+           'benefit', 'advantage', 'profit', 'gain', 'plus', '好处', '优势', '利益',
+           'problem', 'issue', 'trouble', 'challenge', 'difficulty', '问题', '困难',
+           'solution', 'resolve', 'answer', 'fix', 'remedy', '解决方案', '修复', '补救',
+           'time', 'period', 'duration', 'term', 'interval', '时间', '期间', '时长',
+           'date', 'day', 'month', 'year', 'season', 'calendar', '日期', '天', '月',
+           'morning', 'noon', 'afternoon', 'evening', 'night', '早上', '中午', '晚上',
+           'past', 'present', 'future', 'history', 'coming', '过去', '现在', '未来',
+           'early', 'late', 'soon', 'recent', 'latest', 'newest', '早', '晚', '最近',
+           'begin', 'start', 'commence', 'initiate', 'launch', '开始', '启动', '发起',
+           'end', 'finish', 'complete', 'conclude', 'terminate', '结束', '完成', '终止',
+           'during', 'while', 'throughout', 'in', 'the', 'course', '期间', '在...时',
+           'before', 'prior', 'previous', 'preceding', 'formerly', '以前', '先前', '之前',
+           'after', 'later', 'subsequent', 'following', 'succeeding', '之后', '后来',
+           'first', 'second', 'third', 'fourth', 'fifth', '第一', '第二', '第三',
+           'primary', 'secondary', 'tertiary', 'quaternary', 'quinary', '主要', '次要',
+           'main', 'major', 'principal', 'chief', 'key', '主要', '主导', '关键',
+           'minor', 'small', 'tiny', 'little', 'miniature', '次要', '小的', '微小',
+           'big', 'large', 'huge', 'enormous', 'gigantic', '大的', '巨大', '庞大',
+           'medium', 'middle', 'intermediate', 'moderate', 'average', '中等', '中间',
+           'and', 'or', 'but', 'if', 'then', 'thus', 'however', '和', '或', '但',
+           'with', 'without', 'by', 'from', 'to', 'at', 'on', '与', '从', '到', '在',
+           'the', 'this', 'that', 'these', 'those', 'it', 'they', '这', '那', '它',
+           'is', 'are', 'was', 'were', 'be', 'been', 'being', '是', '曾经', '将会',
+           'have', 'has', 'had', 'having', 'own', 'possess', '有', '拥有', '具有',
+           'do', 'does', 'did', 'doing', 'done', 'act', 'perform', '做', '进行',
+           'can', 'could', 'may', 'might', 'shall', 'should', '可以', '应该', '将会',
+           'will', 'would', 'must', 'need', 'necessary', 'require', '将', '必须', '需要',
+           'also', 'too', 'as well', 'additionally', 'moreover', '也', '同样', '此外',
+           'very', 'quite', 'rather', 'fairly', 'pretty', 'somewhat', '非常', '相当',
+           'just', 'only', 'simply', 'merely', 'exclusively', '仅仅', '只是', '简单',
+           'more', 'most', 'many', 'much', 'lots', 'plenty', '更多', '最多', '许多',
+           'less', 'least', 'few', 'little', 'scarce', 'limited', '更少', '最少', '稀少',
+           'all', 'every', 'each', 'any', 'some', 'several', '所有', '每个', '任何',
+           'both', 'either', 'neither', 'none', 'nobody', 'nothing', '两者', '都不',
+           'other', 'another', 'else', 'different', 'various', '其他', '另一个', '不同',
+           'same', 'identical', 'similar', 'like', 'alike', 'equivalent', '相同', '类似',
+           'real', 'actual', 'genuine', 'authentic', 'legitimate', '真实', '实际', '正宗',
+           'fake', 'false', 'counterfeit', 'imitation', 'copy', '假的', '仿制', '复制',
+           'true', 'right', 'correct', 'accurate', 'exact', 'precise', '真', '正确',
+           'wrong', 'incorrect', 'inaccurate', 'imprecise', 'mistaken', '错误', '不准确',
+           'good', 'fine', 'excellent', 'great', 'wonderful', 'superb', '好', '优秀',
+           'bad', 'poor', 'terrible', 'awful', 'horrible', 'dreadful', '坏', '糟糕',
+           'new', 'recent', 'fresh', 'novel', 'innovative', 'modern', '新', '最近',
+           'old', 'ancient', 'antique', 'vintage', 'classic', 'traditional', '旧', '古老',
+           'high', 'tall', 'lofty', 'elevated', 'towering', 'soaring', '高', '高耸',
+           'low', 'short', 'small', 'little', 'diminutive', 'tiny', '低', '矮', '小',
+           'wide', 'broad', 'expansive', 'extensive', 'vast', 'spacious', '宽', '广阔',
+           'narrow', 'slim', 'slender', 'thin', 'lean', 'skinny', '窄', '纤细', '瘦',
+           'thick', 'fat', 'heavy', 'bulky', 'stout', 'plump', '厚', '胖', '重',
+           'round', 'circular', 'spherical', 'globular', 'oval', 'rotund', '圆', '球形',
+           'square', 'rectangular', 'cubic', 'box-shaped', 'quadratic', '方', '方形',
+           'triangle', 'triangular', 'cone', 'conical', 'pyramid', '三角', '锥形',
+           'star', 'stellar', 'starry', 'asterisk', 'pentagram', '星', '星形', '星状',
+           'heart', 'heart-shaped', 'cardiac', 'cordiform', 'cardio', '心', '心形',
+           'hard', 'solid', 'firm', 'rigid', 'stiff', 'inflexible', '硬', '坚固',
+           'soft', 'gentle', 'mild', 'tender', 'pliant', 'yielding', '软', '柔软',
+           'light', 'lightweight', 'feathery', 'airy', 'insubstantial', '轻', '轻量',
+           'heavy', 'weighty', 'ponderous', 'massive', 'substantial', '重', '沉重',
+           'strong', 'powerful', 'mighty', 'potent', 'forceful', '强', '强大', '强劲',
+           'weak', 'feeble', 'frail', 'fragile', 'delicate', 'tender', '弱', '脆弱',
+           'fast', 'quick', 'rapid', 'swift', 'speedy', 'hasty', '快', '迅速', '迅捷',
+           'slow', 'sluggish', 'unhurried', 'leisurely', 'gradual', '慢', '缓慢',
+           'hot', 'warm', 'heated', 'boiling', 'scalding', 'burning', '热', '温暖', '滚烫',
+           'cold', 'cool', 'chilly', 'frigid', 'freezing', 'icy', '冷', '寒冷', '冰冷',
+           'happy', 'glad', 'pleased', 'delighted', 'joyful', 'cheerful', '快乐', '高兴',
+           'sad', 'unhappy', 'sorrowful', 'mournful', 'melancholy', '悲伤', '难过',
+           'love', 'adore', 'like', 'fancy', 'fond', 'affectionate', '爱', '喜欢', '钟爱',
+           'hate', 'dislike', 'detest', 'despise', 'loathe', 'abhor', '恨', '讨厌', '憎恶',
+       ];
+
+       $this->initialized = true;
+   } 
+	
+	// Add the missing closing brace here
+   /**
+    * Extract the cigar brand from a product title
+    * 
+    * @param string $title The product title
+    * @return string|null The extracted brand or null if not found
+    */
+   public function extract_brand($title) {
+       if (isset($this->brand_cache[$title])) {
+           return $this->brand_cache[$title];
+       }
+       
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // Try to find an exact match first in the brand list
+       foreach ($this->cigar_brands as $brand => $translations) {
+           $pattern = '/\b(' . preg_quote($brand, '/') . ')\b/i';
+           if (preg_match($pattern, $normalized_title, $matches)) {
+               $this->brand_cache[$title] = $brand;
+               return $brand;
+           }
+           
+           // Check translations and aliases
+           foreach ($translations as $translation) {
+               $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title, $matches)) {
+                   $this->brand_cache[$title] = $brand;
+                   return $brand;
+               }
+           }
+       }
+       
+       // Check brand aliases
+       foreach ($this->brand_aliases as $alias => $brand) {
+           $pattern = '/\b(' . preg_quote($alias, '/') . ')\b/i';
+           if (preg_match($pattern, $normalized_title, $matches)) {
+               $this->brand_cache[$title] = $brand;
+               return $brand;
+           }
+       }
+       
+       // If still not found, let's try more aggressive fuzzy matching
+       $fuzzy_brand = $this->fuzzy_match_brand($normalized_title);
+       if ($fuzzy_brand) {
+           $this->brand_cache[$title] = $fuzzy_brand;
+           return $fuzzy_brand;
+       }
+       
+       // Check for Chinese translation matches
+       $possible_matches = $this->check_chinese_translations($normalized_title);
+       if (!empty($possible_matches)) {
+           $this->brand_cache[$title] = $possible_matches[0];
+           return $possible_matches[0];
+       }
+       
+       // Not found
+       $this->brand_cache[$title] = null;
+       return null;
+   }
+   
+   /**
+    * Extract the cigar series from a product title
+    * 
+    * @param string $title The product title
+    * @param string|null $brand The brand (if known)
+    * @return string|null The extracted series or null if not found
+    */
+   public function extract_series($title, $brand = null) {
+       $cache_key = $title . '|' . ($brand ?: 'null');
+       if (isset($this->series_cache[$cache_key])) {
+           return $this->series_cache[$cache_key];
+       }
+       
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // If brand was provided, use it to narrow down series search
+       if ($brand && isset($this->cigar_series[$brand])) {
+           foreach ($this->cigar_series[$brand] as $series => $translations) {
+               $pattern = '/\b(' . preg_quote($series, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title, $matches)) {
+                   $this->series_cache[$cache_key] = $series;
+                   return $series;
+               }
+               
+               // Check translations
+               foreach ($translations as $translation) {
+                   $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+                   if (preg_match($pattern, $normalized_title, $matches)) {
+                       $this->series_cache[$cache_key] = $series;
+                       return $series;
+                   }
+               }
+           }
+       }
+       
+       // If not found or no brand provided, check all series
+       foreach ($this->cigar_series as $brand_key => $series_list) {
+           if ($brand && $brand_key != $brand) {
+               continue; // Skip if we're checking a specific brand
+           }
+           
+           foreach ($series_list as $series => $translations) {
+               $pattern = '/\b(' . preg_quote($series, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title, $matches)) {
+                   $this->series_cache[$cache_key] = $series;
+                   return $series;
+               }
+               
+               // Check translations
+               foreach ($translations as $translation) {
+                   $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+                   if (preg_match($pattern, $normalized_title, $matches)) {
+                       $this->series_cache[$cache_key] = $series;
+                       return $series;
+                   }
+               }
+           }
+       }
+       
+       // Check series aliases
+       foreach ($this->series_aliases as $alias => $series) {
+           $pattern = '/\b(' . preg_quote($alias, '/') . ')\b/i';
+           if (preg_match($pattern, $normalized_title, $matches)) {
+               $this->series_cache[$cache_key] = $series;
+               return $series;
+           }
+       }
+       
+       // Try fuzzy matching for series
+       $fuzzy_series = $this->fuzzy_match_series($normalized_title, $brand);
+       if ($fuzzy_series) {
+           $this->series_cache[$cache_key] = $fuzzy_series;
+           return $fuzzy_series;
+       }
+       
+       // Not found
+       $this->series_cache[$cache_key] = null;
+       return null;
+   }
+   
+   /**
+    * Extract the cigar dimensions from a product title
+    * 
+    * @param string $title The product title
+    * @return array|null The extracted dimensions [length, ring gauge] or null if not found
+    */
+   public function extract_dimensions($title) {
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // Try to extract dimensions using regex pattern
+       if (preg_match($this->dimension_regex, $normalized_title, $matches)) {
+           if (isset($matches[1]) && isset($matches[2])) {
+               // Format: 50 x 5, 50x5, 50×5
+               return [
+                   'length' => intval($matches[1]),
+                   'ring_gauge' => intval($matches[2])
+               ];
+           } else if (isset($matches[6]) && isset($matches[7])) {
+               // Format: 50mm RG:5
+               return [
+                   'length' => intval($matches[6]),
+                   'ring_gauge' => intval($matches[7])
+               ];
+           } else if (isset($matches[8]) && isset($matches[9])) {
+               // Format: 50mm by 5mm
+               return [
+                   'length' => intval($matches[8]),
+                   'ring_gauge' => intval($matches[9])
+               ];
+           }
+       }
+       
+       // Check for common size names and their standard dimensions
+       $size_dimensions = [
+           'churchill' => ['length' => 178, 'ring_gauge' => 47],
+           'corona' => ['length' => 142, 'ring_gauge' => 42],
+           'robusto' => ['length' => 124, 'ring_gauge' => 50],
+           'toro' => ['length' => 152, 'ring_gauge' => 52],
+           'torpedo' => ['length' => 152, 'ring_gauge' => 52],
+           'belicoso' => ['length' => 140, 'ring_gauge' => 52],
+           'petit corona' => ['length' => 114, 'ring_gauge' => 42],
+           'lonsdale' => ['length' => 165, 'ring_gauge' => 42],
+           'lancero' => ['length' => 178, 'ring_gauge' => 38],
+           'panetela' => ['length' => 152, 'ring_gauge' => 38],
+           'gordo' => ['length' => 152, 'ring_gauge' => 60],
+           'double corona' => ['length' => 191, 'ring_gauge' => 49],
+           'perfecto' => ['length' => 165, 'ring_gauge' => 48],
+           'pyramid' => ['length' => 152, 'ring_gauge' => 52],
+           'culebra' => ['length' => 140, 'ring_gauge' => 38],
+           'diadema' => ['length' => 203, 'ring_gauge' => 49],
+           'gran corona' => ['length' => 230, 'ring_gauge' => 47],
+           'presidente' => ['length' => 203, 'ring_gauge' => 47],
+           'rothschild' => ['length' => 114, 'ring_gauge' => 48],
+           'short churchill' => ['length' => 143, 'ring_gauge' => 47],
+           'small panetela' => ['length' => 114, 'ring_gauge' => 33],
+           'petit robusto' => ['length' => 102, 'ring_gauge' => 50],
+           'giant' => ['length' => 229, 'ring_gauge' => 57],
+           'half corona' => ['length' => 90, 'ring_gauge' => 44],
+           'petit pyramid' => ['length' => 127, 'ring_gauge' => 50],
+           'short robusto' => ['length' => 102, 'ring_gauge' => 50],
+           'short torpedo' => ['length' => 127, 'ring_gauge' => 52],
+           'toro gordo' => ['length' => 152, 'ring_gauge' => 60],
+           'nub' => ['length' => 102, 'ring_gauge' => 54],
+           'short panetela' => ['length' => 114, 'ring_gauge' => 33],
+           'cigarillo' => ['length' => 76, 'ring_gauge' => 20],
+           'petit' => ['length' => 114, 'ring_gauge' => 40],
+           'hermoso' => ['length' => 140, 'ring_gauge' => 48],
+           'corona gorda' => ['length' => 143, 'ring_gauge' => 46],
+           'gran toro' => ['length' => 152, 'ring_gauge' => 58],
+           'gordito' => ['length' => 114, 'ring_gauge' => 60],
+       ];
+       
+       foreach ($size_dimensions as $size_name => $dimensions) {
+           if (stripos($normalized_title, $size_name) !== false) {
+               return $dimensions;
+           }
+       }
+       
+       // Check for siglo and corresponding dimensions
+       if (preg_match('/siglo\s*(i|1|one|一|一世)/i', $normalized_title)) {
+           return ['length' => 102, 'ring_gauge' => 40];
+       } else if (preg_match('/siglo\s*(ii|2|two|二|二世)/i', $normalized_title)) {
+           return ['length' => 129, 'ring_gauge' => 42];
+       } else if (preg_match('/siglo\s*(iii|3|three|三|三世)/i', $normalized_title)) {
+           return ['length' => 155, 'ring_gauge' => 42];
+       } else if (preg_match('/siglo\s*(iv|4|four|四|四世)/i', $normalized_title)) {
+           return ['length' => 143, 'ring_gauge' => 46];
+       } else if (preg_match('/siglo\s*(v|5|five|五|五世)/i', $normalized_title)) {
+           return ['length' => 170, 'ring_gauge' => 43];
+       } else if (preg_match('/siglo\s*(vi|6|six|六|六世)/i', $normalized_title)) {
+           return ['length' => 150, 'ring_gauge' => 52];
+       }
+       
+       // Check for magnum and corresponding dimensions
+       if (preg_match('/magnum\s*(46)/i', $normalized_title)) {
+           return ['length' => 143, 'ring_gauge' => 46];
+       } else if (preg_match('/magnum\s*(50)/i', $normalized_title)) {
+           return ['length' => 160, 'ring_gauge' => 50];
+       } else if (preg_match('/magnum\s*(54)/i', $normalized_title)) {
+           return ['length' => 130, 'ring_gauge' => 54];
+       } else if (preg_match('/magnum\s*(56)/i', $normalized_title)) {
+           return ['length' => 140, 'ring_gauge' => 56];
+       }
+       
+       // Check for number patterns (Montecristo No. 2, etc.)
+       if (preg_match('/no\.\s*(1|one|一)/i', $normalized_title) || preg_match('/[^\w](1|one|一)[^\w]/i', $normalized_title)) {
+           return ['length' => 165, 'ring_gauge' => 42]; // Typical No. 1 dimensions
+       } else if (preg_match('/no\.\s*(2|two|二)/i', $normalized_title) || preg_match('/[^\w](2|two|二)[^\w]/i', $normalized_title)) {
+           return ['length' => 156, 'ring_gauge' => 52]; // Typical No. 2 dimensions
+       } else if (preg_match('/no\.\s*(3|three|三)/i', $normalized_title) || preg_match('/[^\w](3|three|三)[^\w]/i', $normalized_title)) {
+           return ['length' => 140, 'ring_gauge' => 42]; // Typical No. 3 dimensions
+       } else if (preg_match('/no\.\s*(4|four|四)/i', $normalized_title) || preg_match('/[^\w](4|four|四)[^\w]/i', $normalized_title)) {
+           return ['length' => 129, 'ring_gauge' => 42]; // Typical No. 4 dimensions
+       } else if (preg_match('/no\.\s*(5|five|五)/i', $normalized_title) || preg_match('/[^\w](5|five|五)[^\w]/i', $normalized_title)) {
+           return ['length' => 110, 'ring_gauge' => 40]; // Typical No. 5 dimensions
+       }
+       
+       // Not found
+       return null;
+   }
+   
+   /**
+    * Extract the cigar packaging information from a product title
+    * 
+    * @param string $title The product title
+    * @return array|null The extracted packaging info [type, count] or null if not found
+    */
+   public function extract_packaging($title) {
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // Try to extract box count using regex pattern
+       $packaging_type = null;
+       $count = null;
+       
+       if (preg_match($this->box_regex, $normalized_title, $matches)) {
+           if (isset($matches[1]) && !empty($matches[1])) {
+               $count = intval($matches[1]);
+           } else if (isset($matches[2]) && !empty($matches[2])) {
+               $count = intval($matches[2]);
+           }
+       }
+       
+       // Try to extract packaging type
+       foreach ($this->packaging_patterns as $type => $translations) {
+           foreach ($translations as $translation) {
+               $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title)) {
+                   $packaging_type = $type;
+                   break 2;
+               }
+           }
+       }
+       
+       // Check for common box count patterns
+       if (!$count) {
+           if (preg_match('/\b(\d{1,2})\s*cigar(?:s)?\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*ct\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*count\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*stick(?:s)?\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*pack\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*unit(?:s)?\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           } elseif (preg_match('/\b(\d{1,2})\s*piece(?:s)?\b/i', $normalized_title, $matches)) {
+               $count = intval($matches[1]);
+           }
+       }
+       
+       // Check common box counts
+       $common_counts = [3, 5, 10, 12, 15, 16, 20, 24, 25, 50];
+       foreach ($common_counts as $common_count) {
+           if (strpos($normalized_title, (string)$common_count) !== false) {
+               // Verify this is actually a count and not part of another number or name
+               $pattern = '/\b' . $common_count . '\b/';
+               if (preg_match($pattern, $normalized_title)) {
+                   $count = $common_count;
+                   break;
+               }
+           }
+       }
+       
+       // Check for individual/singles keywords
+       if (!$count && (
+           stripos($normalized_title, 'single') !== false || 
+           stripos($normalized_title, 'singles') !== false || 
+           stripos($normalized_title, 'individual') !== false ||
+           stripos($normalized_title, '单支') !== false ||
+           stripos($normalized_title, '单条') !== false
+       )) {
+           $count = 1;
+           $packaging_type = $packaging_type ?: 'single';
+       }
+       
+       if ($packaging_type || $count) {
+           return [
+               'type' => $packaging_type,
+               'count' => $count
+           ];
+       }
+       
+       // Not found
+       return null;
+   }
+   
+   /**
+    * Extract special edition information from a product title
+    * 
+    * @param string $title The product title
+    * @return string|null The special edition designation or null if not found
+    */
+   public function extract_special_edition($title) {
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // Check for special edition markers
+       foreach ($this->special_editions as $edition => $translations) {
+           foreach ($translations as $translation) {
+               $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title)) {
+                   return $edition;
+               }
+           }
+       }
+       
+       // Check for regional edition markers
+       foreach ($this->regional_editions as $region => $translations) {
+           foreach ($translations as $translation) {
+               $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+               if (preg_match($pattern, $normalized_title)) {
+                   // If found a regional marker, also look for "regional edition" or "edicion regional"
+                   if (stripos($normalized_title, 'regional edition') !== false || 
+                       stripos($normalized_title, 'edicion regional') !== false ||
+                       stripos($normalized_title, 'regional') !== false ||
+                       stripos($normalized_title, '地区版') !== false) {
+                       return 'regional edition ' . $region;
+                   }
+                   return 'regional edition';
+               }
+           }
+       }
+       
+       // Check for limited edition markers
+       foreach ($this->limited_editions as $edition => $translations) {
+           foreach ($translations as $translation) {
+               $pattern = '/\b(' . preg_quote($translation, '/') . ')\b/i';
+              if (preg_match($pattern, $normalized_title)) {
+                   return $edition;
+               }
+           }
+       }
+       
+       // Check for year patterns which often indicate limited editions
+       if (preg_match('/\b(20\d{2})\b/', $normalized_title, $matches)) {
+           return 'limited edition ' . $matches[1];
+       }
+       
+       // Not found
+       return null;
+   }
+   
+   /**
+    * Extract keywords from a product title for better matching
+    * 
+    * @param string $title The product title
+    * @return array Array of extracted keywords
+    */
+   public function extract_keywords($title) {
+       if (isset($this->keywords_cache[$title])) {
+           return $this->keywords_cache[$title];
+       }
+       
+       // Normalize the title
+       $normalized_title = $this->normalize_title($title);
+       
+       // Split into words
+       $words = preg_split('/\s+/', $normalized_title);
+       
+       // Filter out common words and short words
+       $keywords = [];
+       foreach ($words as $word) {
+           $word = trim($word);
+           if (strlen($word) < 2) continue;
+           if (in_array(strtolower($word), $this->ignored_terms)) continue;
+           $keywords[] = $word;
+       }
+       
+       // Store in cache
+       $this->keywords_cache[$title] = $keywords;
+       
+       return $keywords;
+   }
+   
+   /**
+    * Normalize a product title for better matching
+    * 
+    * @param string $title The product title
+    * @return string Normalized title
+    */
+   public function normalize_title($title) {
+       if (isset($this->normalized_cache[$title])) {
+           return $this->normalized_cache[$title];
+       }
+       
+       // Convert to lowercase
+       $normalized = mb_strtolower($title);
+       
+       // Replace common entities and special characters
+       $normalized = html_entity_decode($normalized);
+       $normalized = str_replace(['&amp;', '&', '+'], [' and ', ' and ', ' '], $normalized);
+       
+       // Standardize spaces
+       $normalized = preg_replace('/\s+/', ' ', $normalized);
+       
+       // Replace common substitutes
+       $from = ['ñ', 'á', 'é', 'í', 'ó', 'ú', 'ü'];
+       $to = ['n', 'a', 'e', 'i', 'o', 'u', 'u'];
+       $normalized = str_replace($from, $to, $normalized);
+       
+       // Normalize product name separators
+       $normalized = str_replace(['_', '-', '|', '/', '\\'], ' ', $normalized);
+       
+       // Handle special cases for cigar naming conventions
+       $normalized = preg_replace('/no\.\s*(\d+)/i', 'no.$1', $normalized);
+       $normalized = preg_replace('/serie\s+([a-z])/i', 'serie $1', $normalized);
+       $normalized = preg_replace('/siglo\s+([ivx]+)/i', 'siglo $1', $normalized);
+       
+       // Normalize roman numerals
+       $roman_map = [
+           'i' => '1',
+           'ii' => '2',
+           'iii' => '3',
+           'iv' => '4',
+           'v' => '5',
+           'vi' => '6',
+           'vii' => '7',
+           'viii' => '8',
+           'ix' => '9',
+           'x' => '10'
+       ];
+       
+       foreach ($roman_map as $roman => $num) {
+           // Replace only standalone roman numerals, not within words
+           $normalized = preg_replace('/\b' . $roman . '\b/i', $num, $normalized);
+       }
+       
+       // Store in cache
+       $this->normalized_cache[$title] = $normalized;
+       
+       return $normalized;
+   }
+   
+   /**
+    * Fuzzy match a brand from a product title
+    * 
+    * @param string $title The normalized product title
+    * @return string|null The matched brand or null if not found
+    */
+   public function fuzzy_match_brand($title) {
+       // Simplified extraction of possible brand name based on position
+       $words = explode(' ', $title);
+       
+       // Check first 1-3 words as potential brand names
+       $potential_brands = [];
+       
+       // Try first word
+       if (isset($words[0])) {
+           $potential_brands[] = $words[0];
+       }
+       
+       // Try first two words
+       if (isset($words[0]) && isset($words[1])) {
+           $potential_brands[] = $words[0] . ' ' . $words[1];
+       }
+       
+       // Try first three words
+       if (isset($words[0]) && isset($words[1]) && isset($words[2])) {
+           $potential_brands[] = $words[0] . ' ' . $words[1] . ' ' . $words[2];
+       }
+       
+       // Try first four words (for longer brand names like "san cristobal de la habana")
+       if (isset($words[0]) && isset($words[1]) && isset($words[2]) && isset($words[3])) {
+           $potential_brands[] = $words[0] . ' ' . $words[1] . ' ' . $words[2] . ' ' . $words[3];
+       }
+       
+       // Try adding fifth word for extremely long brand names
+       if (isset($words[0]) && isset($words[1]) && isset($words[2]) &&isset($words[3]) && isset($words[4])) {
+           $potential_brands[] = $words[0] . ' ' . $words[1] . ' ' . $words[2] . ' ' . $words[3] . ' ' . $words[4];
+       }
+       
+       // Check for brand abbreviations
+       $abbreviations = ['h.', 'h', 'el', 'la', 'san', 'por', 'r y j', 'ryj', 'r&j', 'mc'];
+       foreach ($abbreviations as $abbr) {
+           if (stripos($title, $abbr) === 0) {
+               $potential_brands[] = $abbr;
+           }
+       }
+       
+       // Check each potential brand against our brand database
+       foreach ($potential_brands as $potential) {
+           foreach ($this->cigar_brands as $brand => $translations) {
+               // Check for similarity
+               if ($this->string_similarity($brand, $potential) > 0.8) {
+                   return $brand;
+               }
+               
+               // Check translations
+               foreach ($translations as $translation) {
+                   if ($this->string_similarity($translation, $potential) > 0.8) {
+                       return $brand;
+                   }
+               }
+           }
+       }
+       
+       // Check for partial match in the beginning of the title
+       foreach ($this->cigar_brands as $brand => $translations) {
+           if (stripos($title, $brand) === 0) {
+               return $brand;
+           }
+           
+           foreach ($translations as $translation) {
+               if (stripos($title, $translation) === 0) {
+                   return $brand;
+               }
+           }
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Fuzzy match a series from a product title
+    * 
+    * @param string $title The normalized product title
+    * @param string|null $brand The brand (if known)
+    * @return string|null The matched series or null if not found
+    */
+   public function fuzzy_match_series($title, $brand = null) {
+       // If brand is provided, check only that brand's series
+       if ($brand && isset($this->cigar_series[$brand])) {
+           foreach ($this->cigar_series[$brand] as $series => $translations) {
+               // Check for similarity
+               if (stripos($title, $series) !== false || $this->contains_similar_word($title, $series)) {
+                   return $series;
+               }
+               
+               // Check translations
+               foreach ($translations as $translation) {
+                   if (stripos($title, $translation) !== false || $this->contains_similar_word($title, $translation)) {
+                       return $series;
+                   }
+               }
+           }
+       } else {
+           // Check all brands' series
+           foreach ($this->cigar_series as $brand_key => $series_list) {
+               foreach ($series_list as $series => $translations) {
+                   // Check for similarity
+                   if (stripos($title, $series) !== false || $this->contains_similar_word($title, $series)) {
+                       return $series;
+                   }
+                   
+                   // Check translations
+                   foreach ($translations as $translation) {
+                       if (stripos($title, $translation) !== false || $this->contains_similar_word($title, $translation)) {
+                           return $series;
+                       }
+                   }
+               }
+           }
+       }
+       
+       // Check for series numbering patterns
+       if (preg_match('/\b(no\.?\s*\d+|numero\s*\d+|#\d+|siglo\s*[ivx\d]+)\b/i', $title, $matches)) {
+           return strtolower($matches[1]);
+       }
+       
+       return null;
+   }
+   
+   /**
+    * Check if a title contains Chinese translations that match known brands
+    * 
+    * @param string $title The product title
+    * @return array Possible brand matches
+    */
+   public function check_chinese_translations($title) {
+       $possible_matches = [];
+       
+       foreach ($this->translation_mapping as $chinese => $english) {
+           if (mb_strpos($title, $chinese) !== false) {
+               // Found a Chinese term, get the corresponding English term
+               if (is_array($english)) {
+                   // Multiple possible translations
+                   foreach ($english as $term) {
+                       // Check if this term is a brand
+                       foreach ($this->cigar_brands as $brand => $translations) {
+                           if ($brand == $term || in_array($term, $translations)) {
+                               $possible_matches[] = $brand;
+                               break;
+                           }
+                       }
+                   }
+               } else {
+                   // Single translation
+                   // Check if this term is a brand
+                   foreach ($this->cigar_brands as $brand => $translations) {
+                       if ($brand == $english || in_array($english, $translations)) {
+                           $possible_matches[] = $brand;
+                           break;
+                       }
+                   }
+               }
+           }
+       }
+       
+       return array_unique($possible_matches);
+   }
+   
+   /**
+    * Calculate similarity between two strings (Jaro-Winkler distance)
+    * 
+    * @param string $str1 First string
+    * @param string $str2 Second string
+    * @return float Similarity score (0-1)
+    */
+   public function string_similarity($str1, $str2) {
+       // Convert to lowercase
+       $str1 = mb_strtolower($str1);
+       $str2 = mb_strtolower($str2);
+       
+       // Quick check for exact match
+       if ($str1 === $str2) {
+           return 1.0;
+       }
+       
+       // Levenshtein distance (simple but effective for our use case)
+       $leven_dist = levenshtein($str1, $str2);
+       $max_len = max(strlen($str1), strlen($str2));
+       
+       if ($max_len === 0) {
+           return 1.0; // Both strings are empty
+       }
+       
+       return 1.0 - ($leven_dist / $max_len);
+   }
+   
+   /**
+    * Check if a title contains a similar word to the target
+    * 
+    * @param string $title The title to check
+    * @param string $target The target word to look for
+    * @param float $threshold Similarity threshold (0-1)
+    * @return bool True if a similar word is found
+    */
+   public function contains_similar_word($title, $target, $threshold = 0.75) {
+       $words = explode(' ', $title);
+       $target_parts = explode(' ', $target);
+       
+       // Check for multi-word targets
+       if (count($target_parts) > 1) {
+           // Try to find consecutive words that match
+           for ($i = 0; $i < count($words) - count($target_parts) + 1; $i++) {
+               $phrase = '';
+               for ($j = 0; $j < count($target_parts); $j++) {
+                   $phrase .= ' ' . $words[$i + $j];
+               }
+               $phrase = trim($phrase);
+               
+               if ($this->string_similarity($phrase, $target) >= $threshold) {
+                   return true;
+               }
+           }
+       } else {
+           // Single word target, check each word
+           foreach ($words as $word) {
+               if ($this->string_similarity($word, $target) >= $threshold) {
+                   return true;
+               }
+           }
+       }
+       
+       return false;
+   }
+   
+   /**
+    * Translate Chinese text in a title to English for better matching
+    * 
+    * @param string $title The product title
+    * @return string Translated title
+    */
+   public function translate_chinese($title) {
+       // Already cached?
+       if (isset($this->translation_cache[$title])) {
+           return $this->translation_cache[$title];
+       }
+       
+       $translated = $title;
+       
+       // Check for brand translations
+       foreach ($this->translation_mapping as $chinese => $english) {
+           $translated = str_ireplace($chinese, ' ' . (is_array($english) ? $english[0] : $english) . ' ', $translated);
+       }
+       
+       // Clean up multiple spaces
+       $translated = preg_replace('/\s+/', ' ', $translated);
+       
+       // Cache the result
+       $this->translation_cache[$title] = $translated;
+       
+       return $translated;
+   }
+   
+   /**
+    * Match a product to the master database
+    * 
+    * @param array $product The product to match (containing title, etc.)
+    * @param array $master_products The master product database
+    * @param float $threshold Matching threshold (0-1)
+    * @return array|null The matched product or null if no match
+    */
+   public function match_product($product, $master_products, $threshold = 0.75) {
+       // Extract product attributes
+       $brand = $this->extract_brand($product['title']);
+       $series = $this->extract_series($product['title'], $brand);
+       $dimensions = $this->extract_dimensions($product['title']);
+       $packaging = $this->extract_packaging($product['title']);
+       $special_edition = $this->extract_special_edition($product['title']);
+       $keywords = $this->extract_keywords($product['title']);
+       
+       $matches = [];
+       
+       foreach ($master_products as $master_product) {
+           $master_brand = $this->extract_brand($master_product['title']);
+           $master_series = $this->extract_series($master_product['title'], $master_brand);
+           $master_dimensions = $this->extract_dimensions($master_product['title']);
+           $master_packaging = $this->extract_packaging($master_product['title']);
+           $master_special_edition = $this->extract_special_edition($master_product['title']);
+           $master_keywords = $this->extract_keywords($master_product['title']);
+           
+           $score = 0;
+           $weight_sum = 0;
+           
+           // Brand matching (highest weight)
+           if ($brand && $master_brand && $brand === $master_brand) {
+               $score += 0.5;
+           } elseif ($brand && $master_brand && ($this->string_similarity($brand, $master_brand) > 0.8)) {
+               $score += 0.4;
+           }
+           $weight_sum += 0.5;
+           
+           // Series matching
+           if ($series && $master_series && $series === $master_series) {
+               $score += 0.25;
+           } elseif ($series && $master_series && ($this->string_similarity($series, $master_series) > 0.8)) {
+               $score += 0.2;
+           }
+           $weight_sum += 0.25;
+           
+           // Dimensions matching
+           if ($dimensions && $master_dimensions) {
+               $length_diff = abs($dimensions['length'] - $master_dimensions['length']);
+               $ring_diff = abs($dimensions['ring_gauge'] - $master_dimensions['ring_gauge']);
+               
+               if ($length_diff <= 3 && $ring_diff <= 2) {
+                   $score += 0.15;
+               } elseif ($length_diff <= 10 && $ring_diff <= 5) {
+                   $score += 0.1;
+               }
+           }
+           $weight_sum += 0.15;
+           
+           // Packaging matching
+           if ($packaging && $master_packaging) {
+               if ($packaging['type'] && $master_packaging['type'] && $packaging['type'] === $master_packaging['type']) {
+                   $score += 0.05;
+               }
+               if ($packaging['count'] && $master_packaging['count'] && $packaging['count'] === $master_packaging['count']) {
+                   $score += 0.05;
+               }
+           }
+           $weight_sum += 0.1;
+           
+           // Special edition matching
+           if ($special_edition && $master_special_edition && $special_edition === $master_special_edition) {
+               $score += 0.05;
+           } elseif ($special_edition && $master_special_edition && stripos($special_edition, $master_special_edition) !== false) {
+               $score += 0.03;
+           }
+           $weight_sum += 0.05;
+           
+           // Keyword matching
+           $keyword_matches = array_intersect($keywords, $master_keywords);
+           $keyword_score = count($keyword_matches) / max(count($keywords), count($master_keywords), 1);
+           $score += $keyword_score * 0.2;
+           $weight_sum += 0.2;
+           
+           // Translate Chinese text and try again if no good match
+           if ($score / $weight_sum < $threshold) {
+               // Try with translated title
+               $translated_title = $this->translate_chinese($product['title']);
+               $trans_brand = $this->extract_brand($translated_title);
+               $trans_series = $this->extract_series($translated_title, $trans_brand);
+               $trans_keywords = $this->extract_keywords($translated_title);
+               
+               $trans_score = 0;
+               
+               // Brand matching with translated text
+               if ($trans_brand && $master_brand && $trans_brand === $master_brand) {
+                   $trans_score += 0.5;
+               } elseif ($trans_brand && $master_brand && ($this->string_similarity($trans_brand, $master_brand) > 0.8)) {
+                   $trans_score += 0.4;
+               }
+               
+               // Series matching with translated text
+               if ($trans_series && $master_series && $trans_series === $master_series) {
+                   $trans_score += 0.25;
+               } elseif ($trans_series && $master_series && ($this->string_similarity($trans_series, $master_series) > 0.8)) {
+                   $trans_score += 0.2;
+               }
+               
+               // Keyword matching with translated text
+               $trans_keyword_matches = array_intersect($trans_keywords, $master_keywords);
+               $trans_keyword_score = count($trans_keyword_matches) / max(count($trans_keywords), count($master_keywords), 1);
+               $trans_score += $trans_keyword_score * 0.2;
+               
+               // Use the better score
+               if ($trans_score > $score) {
+                   $score = $trans_score;
+               }
+           }
+           
+           // Normalize score
+           $final_score = $score / $weight_sum;
+           
+           if ($final_score >= $threshold) {
+               $matches[] = [
+                   'product' => $master_product,
+                   'score' => $final_score,
+                   'matched_brand' => $master_brand,
+                   'matched_series' => $master_series,
+                   'matched_dimensions' => $master_dimensions,
+                   'matched_packaging' => $master_packaging,
+                   'matched_special_edition' => $master_special_edition
+               ];
+           }
+       }
+       
+       // Sort matches by score descending
+       usort($matches, function($a, $b) {
+           return $b['score'] <=> $a['score'];
+       });
+       
+       // Return the best match or null
+       return !empty($matches) ? $matches[0] : null;
+   }
+   
+   /**
+    * Generate a mapping report for debugging
+    * 
+    * @param array $product The product being mapped
+    * @return string Report text
+    */
+   public function generate_mapping_report($product) {
+       $brand = $this->extract_brand($product['title']);
+       $series = $this->extract_series($product['title'], $brand);
+       $dimensions = $this->extract_dimensions($product['title']);
+       $packaging = $this->extract_packaging($product['title']);
+       $special_edition = $this->extract_special_edition($product['title']);
+       $keywords = $this->extract_keywords($product['title']);
+       
+       $report = "==== Mapping Report ====\n";
+       $report .= "Title: " . $product['title'] . "\n";
+       $report .= "Extracted Brand: " . ($brand ?: 'NULL') . "\n";
+       $report .= "Extracted Series: " . ($series ?: 'NULL') . "\n";
+       $report .= "Extracted Dimensions: " . (
+           $dimensions ? $dimensions['length'] . 'mm x ' . $dimensions['ring_gauge'] . ' RG' : 'NULL'
+       ) . "\n";
+       $report .= "Extracted Packaging: " . (
+           $packaging ? ($packaging['type'] ?: 'Unknown type') . ' of ' . ($packaging['count'] ?: 'Unknown count') : 'NULL'
+       ) . "\n";
+       $report .= "Extracted Special Edition: " . ($special_edition ?: 'NULL') . "\n";
+       $report .= "Extracted Keywords: " . implode(', ', $keywords) . "\n";
+       
+       return $report;
+   }
+   
+   /**
+    * Bulk match products from supplier to master database
+    * 
+    * @param array $supplier_products Array of supplier products
+    * @param array $master_products Array of master products
+    * @param float $threshold Matching threshold (0-1)
+    * @return array Matched products
+    */
+   public function bulk_match_products($supplier_products, $master_products, $threshold = 0.75) {
+       $matches = [];
+       $unmatched = [];
+       
+       foreach ($supplier_products as $supplier_product) {
+           $match = $this->match_product($supplier_product, $master_products, $threshold);
+           
+           if ($match) {
+               $matches[] = [
+                   'supplier_product' => $supplier_product,
+                   'master_product' => $match['product'],
+                   'score' => $match['score'],
+                   'details' => [
+                       'brand' => $match['matched_brand'],
+                       'series' => $match['matched_series'],
+                       'dimensions' => $match['matched_dimensions'],
+                       'packaging' => $match['matched_packaging'],
+                       'special_edition' => $match['matched_special_edition']
+                   ]
+               ];
+           } else {
+               $unmatched[] = $supplier_product;
+           }
+       }
+       
+  return [
+           'matches' => $matches,
+           'unmatched' => $unmatched
+      ];
+   
+   }      
+	   
+	   
+	   /** nce of this class
+ * @return KT_Cigar_Mappings Instance of this class
+ */
+public static function get_instance() {
+    static $instance = null;
+    if ($instance === null) {
+        $instance = new self();
+    }
+    return $instance;
+}
+
+/**
+ * Static wrapper for extract_brand
+ */
+public static function extract_brand($title) {
+    $instance = self::get_instance();
+    return $instance->extract_brand($title);
+}
+
+/**
+ * Static wrapper for extract_series
+ */
+public static function extract_series($title, $brand = null) {
+    $instance = self::get_instance();
+    return $instance->extract_series($title, $brand);
+}
+
+/**
+ * Static wrapper for extract_dimensions
+ */
+public static function extract_dimensions($title) {
+    $instance = self::get_instance();
+    return $instance->extract_dimensions($title);
+}
+
+/**
+ * Static wrapper for extract_packaging
+ */
+public static function extract_packaging($title) {
+    $instance = self::get_instance();
+    return $instance->extract_packaging($title);
+}
+
+/**
+ * Static wrapper for extract_special_edition
+ */
+public static function extract_special_edition($title) {
+    $instance = self::get_instance();
+    return $instance->extract_special_edition($title);
+}
+
+/**
+ * Static wrapper for extract_keywords
+ */
+public static function extract_keywords($title) {
+    $instance = self::get_instance();
+    return $instance->extract_keywords($title);
+}
+
+/**
+ * Static wrapper for normalize_title
+ */
+public static function normalize_title($title) {
+    $instance = self::get_instance();
+    return $instance->normalize_title($title);
+}
+
+/**
+ * Static wrapper for match_product
+ */
+public static function match_product($product, $master_products, $threshold = 0.75) {
+    $instance = self::get_instance();
+    return $instance->match_product($product, $master_products, $threshold);
+}
+
+/**
+ * Static wrapper for bulk_match_products
+ */
+public static function bulk_match_products($supplier_products, $master_products, $threshold = 0.75) {
+    $instance = self::get_instance();
+    return $instance->bulk_match_products($supplier_products, $master_products, $threshold);
+}
+
+/**
+ * Static wrapper for generate_mapping_report
+ */
+public static function generate_mapping_report($product) {
+    $instance = self::get_instance();
+    return $instance->generate_mapping_report($product);
+}
+	
+// Add these static method aliases
+public static function __callStatic($method, $args) {
+    $instance = self::get_instance();
+    if (method_exists($instance, $method)) {
+        return call_user_func_array([$instance, $method], $args);
+    }
+    throw new Exception("Method {$method} does not exist");
+}
+}	
