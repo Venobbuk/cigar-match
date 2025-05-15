@@ -1,0 +1,1456 @@
+
+/**
+ * KT Cigar Mappings - Advanced Brand and Series Recognition
+ * Contains comprehensive mappings and pattern recognition for cigar brands and series
+ * Enhanced with more robust pattern matching and intelligent scoring algorithms
+ *
+ * Version: 6.0 - Improved organization with separate data file
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+/**
+ * KT_Cigar_Debug class for logging and debugging
+ */
+class KT_Cigar_Debug {
+    private static $instance = null;
+    private $log_file;
+    private $log_level;
+    
+    /**
+     * Initialize the debug class
+     */
+    public static function init($log_file = '', $log_level = 3) {
+        if (self::$instance === null) {
+            self::$instance = new self($log_file, $log_level);
+        }
+        return self::$instance;
+    }
+    
+    /**
+     * Constructor
+     */
+    private function __construct($log_file, $log_level) {
+        $this->log_level = $log_level;
+        if (empty($log_file)) {
+            $this->log_file = WP_CONTENT_DIR . '/kt-cigar-debug.log';
+        } else {
+            $this->log_file = $log_file;
+        }
+    }
+    
+    /**
+     * Log a message
+     */
+    public static function log($message, $level = 1) {
+        $instance = self::init();
+        if ($level <= $instance->log_level) {
+            $timestamp = date('Y-m-d H:i:s');
+            $formatted_message = "[$timestamp] $message\n";
+            file_put_contents($instance->log_file, $formatted_message, FILE_APPEND);
+        }
+    }
+}
+
+/**
+ * KT_Cigar_Mappings - Main class for cigar mappings and processing
+ */
+class KT_Cigar_Mappings {
+    // Class properties
+    private static $data = null;
+    private static $debug = false;
+    
+    /**
+     * Initialize data by loading from external file
+     */
+    public static function init($debug = false) {
+        self::$debug = $debug;
+        
+        if (self::$debug) {
+            KT_Cigar_Debug::init('', 3);
+        }
+        
+        // Load data from external file if not already loaded
+        if (self::$data === null) {
+            self::$data = include(WP_CONTENT_DIR . '/cigar-mappings-data.php');
+        }
+    }
+    
+    /**
+     * Get Cuban brand mappings
+     */
+    public static function get_cuban_brand_mappings() {
+        self::init();
+        return self::$data['brands']['cuban'];
+    }
+    
+    /**
+     * Get non-Cuban brand mappings
+     */
+    public static function get_non_cuban_brand_mappings() {
+        self::init();
+        return self::$data['brands']['non_cuban'];
+    }
+    
+    /**
+     * Get size mappings
+     */
+    public static function get_size_mappings() {
+        self::init();
+        return self::$data['sizes'];
+    }
+    
+    /**
+     * Get special edition mappings
+     */
+    public static function get_special_edition_mappings() {
+        self::init();
+        return self::$data['special_editions'];
+    }
+    
+    /**
+     * Get regional edition mappings
+     */
+    public static function get_regional_edition_mappings() {
+        self::init();
+        return self::$data['regional_editions'];
+    }
+    
+    /**
+     * Get special mappings including dimension patterns, etc.
+     */
+    public static function get_special_mappings() {
+        self::init();
+        return [
+            'model_patterns' => self::$data['model_patterns'],
+            'dimension_patterns' => self::$data['dimension_patterns'],
+            'year_patterns' => self::$data['year_patterns'],
+            'regional_patterns' => self::$data['regional_patterns'],
+            'special_editions' => self::$data['special_editions'],
+            'packaging' => self::$data['packaging']
+        ];
+    }
+    
+    /**
+     * Get Chinese Zodiac year mapping
+     */
+    public static function get_zodiac_year_mapping() {
+        self::init();
+        return self::$data['zodiac_years'];
+    }
+    
+    /**
+     * Get distributor mappings
+     */
+    public static function get_distributor_mappings() {
+        self::init();
+        return self::$data['distributor_mappings'];
+    }
+    
+    /**
+     * Process a row from the Cuban Cigar CSV and find matches
+     */
+    public static function process_csv_row($csv_row, $debug = false) {
+        self::init($debug);
+        
+        // Skip if no title
+        if (empty($csv_row['title'])) {
+            return $csv_row;
+        }
+        
+        $title = $csv_row['title'];
+        
+        if (self::$debug) {
+            KT_Cigar_Debug::log("Processing row: $title", 1);
+        }
+        
+        // Extract brand
+        $brand = self::extract_brand($title);
+        if ($brand) {
+            $csv_row['brand'] = $brand;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Brand found: $brand", 2);
+            }
+            
+            // Extract series if brand found
+            $series = self::extract_series($title, $brand);
+            if ($series) {
+                $csv_row['series'] = $series;
+                if (self::$debug) {
+                    KT_Cigar_Debug::log("Series found: $series", 2);
+                }
+            }
+        }
+        
+        // Extract size
+        $size = self::extract_size($title);
+        if ($size) {
+            $csv_row['size'] = $size;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Size found: $size", 2);
+            }
+        }
+        
+        // Extract special edition
+        $special_edition = self::extract_special_edition($title);
+        if ($special_edition) {
+            $csv_row['special_edition'] = $special_edition;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Special edition found: $special_edition", 2);
+            }
+        }
+        
+        // Extract regional edition
+        $regional_edition = self::extract_regional_edition($title);
+        if ($regional_edition) {
+            $csv_row['regional_edition'] = $regional_edition;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Regional edition found: $regional_edition", 2);
+            }
+        }
+        
+        // Extract year
+        $year = self::extract_year($title);
+        if ($year) {
+            $csv_row['year'] = $year;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Year found: $year", 2);
+            }
+        }
+        
+        // Extract dimensions (ring gauge and length)
+        $dimensions = self::extract_dimensions($title);
+        if (!empty($dimensions)) {
+            if (!empty($dimensions['ring_gauge'])) {
+                $csv_row['ring_gauge'] = $dimensions['ring_gauge'];
+                if (self::$debug) {
+                    KT_Cigar_Debug::log("Ring gauge found: {$dimensions['ring_gauge']}", 2);
+                }
+            }
+            
+            if (!empty($dimensions['length'])) {
+                $csv_row['length'] = $dimensions['length'];
+                if (self::$debug) {
+                    KT_Cigar_Debug::log("Length found: {$dimensions['length']}", 2);
+                }
+            }
+        }
+        
+        // Extract packaging
+        $packaging = self::extract_packaging($title);
+        if ($packaging) {
+            $csv_row['packaging'] = $packaging;
+            if (self::$debug) {
+                KT_Cigar_Debug::log("Packaging found: $packaging", 2);
+            }
+        }
+        
+        return $csv_row;
+    }
+    
+    /**
+     * Extract brand from a product title with enhanced pattern matching
+     */
+    public static function extract_brand($title, $options = []) {
+        self::init();
+        
+        // Default options
+        $default_options = [
+            'use_fuzzy_matching' => true,
+            'threshold' => 0.7,
+            'check_aliases' => true
+        ];
+        
+        $options = array_merge($default_options, $options);
+        
+        // Normalize title
+        $title = self::normalize_text($title);
+        
+        // Log the title we're analyzing if debug is enabled
+        if (self::$debug) {
+            KT_Cigar_Debug::log("Extracting brand from title: $title", 2);
+        }
+        
+        // First check for exact brand matches
+        $all_brands = array_merge(self::get_cuban_brand_mappings(), self::get_non_cuban_brand_mappings());
+        
+        // Store matching scores
+        $brand_scores = [];
+        
+        foreach ($all_brands as $brand => $variations) {
+            // Check direct brand name match
+            if (mb_stripos($title, $brand) !== false) {
+                $brand_scores[$brand] = 1.0; // Perfect match
+                continue;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    $brand_scores[$brand] = 1.0; // Perfect match for variation
+                    break;
+                }
+            }
+            
+            // If we already have a perfect match, no need for fuzzy matching
+            if (isset($brand_scores[$brand]) && $brand_scores[$brand] >= 0.9) {
+                continue;
+            }
+            
+            // Perform fuzzy matching if enabled
+            if ($options['use_fuzzy_matching']) {
+                // Simple implementation - check for partial matches
+                $words = preg_split('/[\s\-_]+/u', $title);
+                
+                foreach ($words as $word) {
+                    if (strlen($word) < 3) continue; // Skip short words
+                    
+                    // Check if this word is part of the brand name
+                    if (mb_stripos($brand, $word) !== false) {
+                        $score = min(1.0, strlen($word) / strlen($brand) * 0.9);
+                        $brand_scores[$brand] = max($brand_scores[$brand] ?? 0, $score);
+                    }
+                    
+                    // Check variations too
+                    foreach ($variations as $variation) {
+                        if (mb_stripos($variation, $word) !== false) {
+                            $score = min(1.0, strlen($word) / strlen($variation) * 0.9);
+                            $brand_scores[$brand] = max($brand_scores[$brand] ?? 0, $score);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check brand aliases if enabled
+        if ($options['check_aliases'] && !empty(self::$data['brand_aliases'])) {
+            foreach (self::$data['brand_aliases'] as $alias => $brand) {
+                if (mb_stripos($title, $alias) !== false) {
+                    $brand_scores[$brand] = max($brand_scores[$brand] ?? 0, 0.9); // Good match from alias
+                }
+            }
+        }
+        
+        // Find the best match
+        arsort($brand_scores);
+        
+        // Log matches if debug is enabled
+        if (self::$debug && !empty($brand_scores)) {
+            $top_matches = array_slice($brand_scores, 0, 3, true);
+            $matches_str = '';
+            foreach ($top_matches as $brand => $score) {
+                $matches_str .= "$brand: " . round($score * 100) . "%, ";
+            }
+            KT_Cigar_Debug::log("Top brand matches: $matches_str", 2);
+        }
+        
+        // Return best match if it meets the threshold
+        foreach ($brand_scores as $brand => $score) {
+            if ($score >= $options['threshold']) {
+                return $brand;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract series from title if brand is known
+     */
+    public static function extract_series($title, $brand) {
+        self::init();
+        
+        if (empty($brand) || empty(self::$data['series'][$brand])) {
+            return null;
+        }
+        
+        $title = self::normalize_text($title);
+        $series_mappings = self::$data['series'][$brand];
+        
+        foreach ($series_mappings as $series => $variations) {
+            // Check direct series name match
+            if (mb_stripos($title, $series) !== false) {
+                return $series;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    return $series;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract size from title
+     */
+    public static function extract_size($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $size_mappings = self::$data['sizes'];
+        
+        foreach ($size_mappings as $size => $variations) {
+            // Check direct size name match
+            if (mb_stripos($title, $size) !== false) {
+                return $size;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    return $size;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract special edition from title
+     */
+    public static function extract_special_edition($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $special_edition_mappings = self::$data['special_editions'];
+        
+        foreach ($special_edition_mappings as $special_edition => $variations) {
+            // Check direct special edition name match
+            if (mb_stripos($title, $special_edition) !== false) {
+                return $special_edition;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    return $special_edition;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract regional edition from title
+     */
+    public static function extract_regional_edition($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $regional_edition_mappings = self::$data['regional_editions'];
+        
+        // First check if it's a regional edition at all
+        $is_regional = false;
+        foreach (self::$data['special_editions']['edicion regional'] as $variation) {
+            if (mb_stripos($title, $variation) !== false) {
+                $is_regional = true;
+                break;
+            }
+        }
+        
+        if (!$is_regional) {
+            return null;
+        }
+        
+        // Look for specific region
+        foreach ($regional_edition_mappings as $region => $variations) {
+            // Check direct region name match
+            if (mb_stripos($title, $region) !== false) {
+                return $region;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    return $region;
+                }
+            }
+        }
+        
+        // If we found it's a regional edition but couldn't identify the region
+        return 'unspecified';
+    }
+    
+    /**
+     * Extract year from title
+     */
+    public static function extract_year($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $year_patterns = self::$data['year_patterns'];
+        
+        foreach ($year_patterns as $pattern) {
+            if (preg_match($pattern, $title, $matches)) {
+                $year = intval($matches[1]);
+                // Only consider reasonable years (1900-2099)
+                if ($year >= 1900 && $year <= 2099) {
+                    return $year;
+                }
+            }
+        }
+        
+        // Check for Chinese zodiac years
+        $zodiac_mappings = self::$data['zodiac_years'];
+        foreach ($zodiac_mappings as $animal => $variations) {
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    // Map to the most recent past year for this zodiac animal
+                    $current_year = date('Y');
+                    $zodiac_cycle = [
+                        'rat' => 2020, 'ox' => 2021, 'tiger' => 2022, 'rabbit' => 2023,
+                        'dragon' => 2024, 'snake' => 2025, 'horse' => 2026, 'goat' => 2027,
+                        'monkey' => 2028, 'rooster' => 2029, 'dog' => 2030, 'pig' => 2031
+                    ];
+                    
+                    $base_year = $zodiac_cycle[$animal] ?? 2020;
+                    $year_diff = ($current_year - $base_year) % 12;
+                    if ($year_diff < 0) {
+                        $year_diff += 12;
+                    }
+                    
+                    return $current_year - $year_diff;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Extract dimensions (ring gauge and length) from title
+     */
+    public static function extract_dimensions($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $dimension_patterns = self::$data['dimension_patterns'];
+        $dimensions = [];
+        
+        // Look for combined dimensions (e.g., 50 x 124)
+        foreach ($dimension_patterns['ring_gauge'] as $pattern) {
+            if (preg_match($pattern, $title, $matches)) {
+                if (count($matches) >= 3) {
+                    // If the pattern captures both ring gauge and length
+                    $dimensions['ring_gauge'] = intval($matches[1]);
+                    $dimensions['length'] = intval($matches[2]);
+                    break;
+                } elseif (count($matches) >= 2) {
+                    // If the pattern only captures ring gauge
+                    $dimensions['ring_gauge'] = intval($matches[1]);
+                }
+            }
+        }
+        
+        // If we don't have length yet, look for it separately
+        if (empty($dimensions['length'])) {
+            foreach ($dimension_patterns['length'] as $pattern) {
+                if (preg_match($pattern, $title, $matches) && count($matches) >= 2) {
+                    $dimensions['length'] = intval($matches[1]);
+                    break;
+                }
+            }
+        }
+        
+        return $dimensions;
+    }
+    
+    /**
+     * Extract packaging type from title
+     */
+    public static function extract_packaging($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $packaging_mappings = self::$data['packaging'];
+        
+        foreach ($packaging_mappings as $package_type => $variations) {
+            // Check direct package type match
+            if (mb_stripos($title, $package_type) !== false) {
+                return $package_type;
+            }
+            
+            // Check variations
+            foreach ($variations as $variation) {
+                if (mb_stripos($title, $variation) !== false) {
+                    return $package_type;
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Normalize text by removing special characters and standardizing
+     */
+    public static function normalize_text($text) {
+        // Convert to lowercase
+        $text = mb_strtolower($text, 'UTF-8');
+        
+        // Replace multiple spaces with a single space
+        $text = preg_replace('/\s+/u', ' ', $text);
+        
+        // Trim leading and trailing spaces
+        $text = trim($text);
+        
+        return $text;
+    }
+    
+    /**
+     * Translate a term using the translation mapping
+     */
+    public static function translate_term($term) {
+        self::init();
+        
+        $term = self::normalize_text($term);
+        
+        foreach (self::$data['translation_mapping'] as $english => $translations) {
+            if ($term === $english) {
+                return $english; // Already in English
+            }
+            
+            foreach ($translations as $translation) {
+                if ($term === $translation) {
+                    return $english; // Found a match, return English term
+                }
+            }
+        }
+        
+        return $term; // No translation found, return original
+    }
+    
+   /**
+     * Check if a title contains ignored terms that should be filtered out
+     */
+    public static function contains_ignored_terms($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $ignored_terms = self::$data['ignored_terms'];
+        
+        foreach ($ignored_terms as $term) {
+            if (mb_stripos($title, $term) !== false) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Get all series for a specific brand
+     */
+    public static function get_series_for_brand($brand) {
+        self::init();
+        
+        if (empty($brand) || empty(self::$data['series'][$brand])) {
+            return [];
+        }
+        
+        return array_keys(self::$data['series'][$brand]);
+    }
+    
+    /**
+     * Check if a brand is Cuban
+     */
+    public static function is_cuban_brand($brand) {
+        self::init();
+        
+        $cuban_brands = self::get_cuban_brand_mappings();
+        return isset($cuban_brands[$brand]);
+    }
+    
+    /**
+     * Check if a brand is non-Cuban
+     */
+    public static function is_non_cuban_brand($brand) {
+        self::init();
+        
+        $non_cuban_brands = self::get_non_cuban_brand_mappings();
+        return isset($non_cuban_brands[$brand]);
+    }
+    
+    /**
+     * Get all variations for a specific brand
+     */
+    public static function get_brand_variations($brand) {
+        self::init();
+        
+        $cuban_brands = self::get_cuban_brand_mappings();
+        if (isset($cuban_brands[$brand])) {
+            return $cuban_brands[$brand];
+        }
+        
+        $non_cuban_brands = self::get_non_cuban_brand_mappings();
+        if (isset($non_cuban_brands[$brand])) {
+            return $non_cuban_brands[$brand];
+        }
+        
+        return [];
+    }
+    
+    /**
+     * Extracts model number from title (e.g., No. 2, No. 4)
+     */
+    public static function extract_model_number($title) {
+        self::init();
+        
+        $title = self::normalize_text($title);
+        $model_patterns = self::$data['model_patterns'];
+        
+        foreach ($model_patterns as $pattern) {
+            if (preg_match($pattern, $title, $matches) && count($matches) >= 2) {
+                return $matches[1]; // Return the captured model number
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Process batch of CSV rows
+     */
+    public static function process_csv_batch($rows, $debug = false) {
+        self::init($debug);
+        
+        $processed_rows = [];
+        
+        foreach ($rows as $row) {
+            $processed_rows[] = self::process_csv_row($row, $debug);
+        }
+        
+        return $processed_rows;
+    }
+    
+    /**
+     * Analyze a string and extract all possible cigar-related information
+     * Returns an array of extracted data
+     */
+    public static function analyze_string($text, $options = []) {
+        self::init();
+        
+        // Default options
+        $default_options = [
+            'debug' => false,
+            'use_fuzzy_matching' => true,
+            'threshold' => 0.7,
+            'extract_all' => true
+        ];
+        
+        $options = array_merge($default_options, $options);
+        
+        $result = [
+            'original_text' => $text,
+            'normalized_text' => self::normalize_text($text)
+        ];
+        
+        if ($options['debug']) {
+            KT_Cigar_Debug::log("Analyzing string: $text", 1);
+        }
+        
+        // Extract brand
+        $brand = self::extract_brand($text, [
+            'use_fuzzy_matching' => $options['use_fuzzy_matching'],
+            'threshold' => $options['threshold'],
+            'check_aliases' => true
+        ]);
+        
+        if ($brand) {
+            $result['brand'] = $brand;
+            
+            // Extract series if brand found
+            $series = self::extract_series($text, $brand);
+            if ($series) {
+                $result['series'] = $series;
+            }
+        }
+        
+        // Only continue if we found a brand or we're extracting all data
+        if ($brand || $options['extract_all']) {
+            // Extract size
+            $size = self::extract_size($text);
+            if ($size) {
+                $result['size'] = $size;
+            }
+            
+            // Extract special edition
+            $special_edition = self::extract_special_edition($text);
+            if ($special_edition) {
+                $result['special_edition'] = $special_edition;
+            }
+            
+            // Extract regional edition
+            $regional_edition = self::extract_regional_edition($text);
+            if ($regional_edition) {
+                $result['regional_edition'] = $regional_edition;
+            }
+            
+            // Extract year
+            $year = self::extract_year($text);
+            if ($year) {
+                $result['year'] = $year;
+            }
+            
+            // Extract dimensions
+            $dimensions = self::extract_dimensions($text);
+            if (!empty($dimensions)) {
+                if (!empty($dimensions['ring_gauge'])) {
+                    $result['ring_gauge'] = $dimensions['ring_gauge'];
+                }
+                
+                if (!empty($dimensions['length'])) {
+                    $result['length'] = $dimensions['length'];
+                }
+            }
+            
+            // Extract model number
+            $model_number = self::extract_model_number($text);
+            if ($model_number) {
+                $result['model_number'] = $model_number;
+            }
+            
+            // Extract packaging
+            $packaging = self::extract_packaging($text);
+            if ($packaging) {
+                $result['packaging'] = $packaging;
+            }
+        }
+        
+        return $result;
+    }
+    
+    /**
+     * Format extracted cigar data into a human-readable string
+     */
+    public static function format_cigar_data($data) {
+        if (empty($data)) {
+            return "No cigar data found.";
+        }
+        
+        $output = [];
+        
+        if (!empty($data['brand'])) {
+            $output[] = "Brand: " . ucfirst($data['brand']);
+        }
+        
+        if (!empty($data['series'])) {
+            $output[] = "Series: " . ucfirst($data['series']);
+        }
+        
+        if (!empty($data['model_number'])) {
+            $output[] = "Model: No. " . $data['model_number'];
+        }
+        
+        if (!empty($data['size'])) {
+            $output[] = "Size: " . ucfirst($data['size']);
+        }
+        
+        if (!empty($data['ring_gauge']) || !empty($data['length'])) {
+            $dimensions = "";
+            if (!empty($data['ring_gauge'])) {
+                $dimensions .= "Ring Gauge: " . $data['ring_gauge'];
+            }
+            
+            if (!empty($data['length'])) {
+                if (!empty($dimensions)) {
+                    $dimensions .= ", ";
+                }
+                $dimensions .= "Length: " . $data['length'] . "mm";
+            }
+            
+            $output[] = "Dimensions: " . $dimensions;
+        }
+        
+        if (!empty($data['special_edition'])) {
+            $output[] = "Special Edition: " . ucfirst($data['special_edition']);
+        }
+        
+        if (!empty($data['regional_edition'])) {
+            $output[] = "Regional Edition: " . ucfirst($data['regional_edition']);
+        }
+        
+        if (!empty($data['year'])) {
+            $output[] = "Year: " . $data['year'];
+        }
+        
+        if (!empty($data['packaging'])) {
+            $output[] = "Packaging: " . ucfirst($data['packaging']);
+        }
+        
+        return implode("\n", $output);
+    }
+    
+    /**
+     * Generate a standardized product title from extracted cigar data
+     */
+    public static function generate_product_title($data) {
+        if (empty($data) || empty($data['brand'])) {
+            return "";
+        }
+        
+        $title_parts = [];
+        
+        // Brand (always first)
+        $title_parts[] = ucfirst($data['brand']);
+        
+        // Series
+        if (!empty($data['series'])) {
+            $title_parts[] = ucfirst($data['series']);
+        }
+        
+        // Model number
+        if (!empty($data['model_number'])) {
+            $title_parts[] = "No. " . $data['model_number'];
+        }
+        
+        // Size
+        if (!empty($data['size'])) {
+            $title_parts[] = ucfirst($data['size']);
+        }
+        
+        // Special edition
+        if (!empty($data['special_edition'])) {
+            $title_parts[] = ucfirst($data['special_edition']);
+        }
+        
+        // Regional edition
+        if (!empty($data['regional_edition']) && $data['regional_edition'] !== 'unspecified') {
+            $title_parts[] = ucfirst($data['regional_edition']) . " Regional Edition";
+        }
+        
+        // Year
+        if (!empty($data['year'])) {
+            $title_parts[] = $data['year'];
+        }
+        
+        return implode(" ", $title_parts);
+    }
+    
+    /**
+     * Check compatibility between different cigar attributes (e.g., brand and series)
+     * Returns true if compatible, false otherwise
+     */
+    public static function check_attributes_compatibility($attributes) {
+        self::init();
+        
+        // Check if brand and series are compatible
+        if (!empty($attributes['brand']) && !empty($attributes['series'])) {
+            $brand = $attributes['brand'];
+            $series = $attributes['series'];
+            
+            // Check if this series exists for this brand
+            if (!empty(self::$data['series'][$brand])) {
+                return isset(self::$data['series'][$brand][$series]);
+            }
+            
+            return false;
+        }
+        
+        // All other attributes are considered compatible
+        return true;
+    }
+    
+    /**
+     * Find all potential brand matches in a text
+     * Returns an array of [brand => score] pairs
+     */
+    public static function find_potential_brand_matches($text, $threshold = 0.5) {
+        self::init();
+        
+        $text = self::normalize_text($text);
+        $all_brands = array_merge(self::get_cuban_brand_mappings(), self::get_non_cuban_brand_mappings());
+        $matches = [];
+        
+        foreach ($all_brands as $brand => $variations) {
+            $score = 0;
+            
+            // Check direct brand name match
+            if (mb_stripos($text, $brand) !== false) {
+                $score = 1.0;
+            } else {
+                // Check variations
+                foreach ($variations as $variation) {
+                    if (mb_stripos($text, $variation) !== false) {
+                        $score = 1.0;
+                        break;
+                    }
+                }
+                
+                // If no exact match, try partial matching
+                if ($score < $threshold) {
+                    $words = preg_split('/[\s\-_]+/u', $text);
+                    
+                    foreach ($words as $word) {
+                        if (strlen($word) < 3) continue;
+                        
+                        if (mb_stripos($brand, $word) !== false) {
+                            $score = max($score, min(0.8, strlen($word) / strlen($brand) * 0.9));
+                        }
+                        
+                        foreach ($variations as $variation) {
+                            if (mb_stripos($variation, $word) !== false) {
+                                $score = max($score, min(0.8, strlen($word) / strlen($variation) * 0.9));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Check aliases
+            if (!empty(self::$data['brand_aliases'])) {
+                foreach (self::$data['brand_aliases'] as $alias => $alias_brand) {
+                    if ($alias_brand === $brand && mb_stripos($text, $alias) !== false) {
+                        $score = max($score, 0.9);
+                        break;
+                    }
+                }
+            }
+            
+            if ($score >= $threshold) {
+                $matches[$brand] = $score;
+            }
+        }
+        
+        arsort($matches);
+        return $matches;
+    }
+
+// Add these methods to your KT_Cigar_Mappings class (add them before the closing brace of the class)
+
+/**
+ * Process internal product data for matching
+ * 
+ * @param array|string $product_data Either an array of product data or just the SKU
+ * @return array Processed product array
+ */
+public static function process_internal_product($product_data) {
+    self::init();
+    
+    // If product_data is an array, extract the properties
+    if (is_array($product_data)) {
+        $sku = $product_data['sku'] ?? '';
+        $title = $product_data['title'] ?? '';
+        $brand = $product_data['brand'] ?? '';
+        $seat_row = $product_data['seat_row'] ?? '';
+        $seat_number = $product_data['seat_number'] ?? '';
+    } else {
+        // Legacy support - if just passing SKU, title, dimensions as separate params
+        $args = func_get_args();
+        $sku = $args[0] ?? '';
+        $title = $args[1] ?? '';
+        $dimensions = $args[2] ?? '';
+        
+        // Parse dimensions if provided
+        $seat_row = '';
+        $seat_number = '';
+        if (!empty($dimensions) && strpos($dimensions, '/') !== false) {
+            list($seat_row, $seat_number) = explode('/', $dimensions, 2);
+            $seat_row = trim($seat_row);
+            $seat_number = trim($seat_number);
+        }
+        
+        // Extract brand from title if not provided
+        $brand = self::extract_brand($title);
+    }
+    
+    // Create dimensions string
+    $dimensions = '';
+    if (!empty($seat_row) || !empty($seat_number)) {
+        $dimensions = $seat_row . '/' . $seat_number;
+    }
+    
+    // Process the product title
+    $normalized_title = self::normalize_text($title);
+    
+    // Extract additional information
+    $series = '';
+    if (!empty($brand)) {
+        $series = self::extract_series($title, $brand);
+    }
+    
+    $size = self::extract_size($title);
+    $year = self::extract_year($title);
+    $dimension_info = self::extract_dimensions($title);
+    
+    // Extract keywords
+    $keywords = self::extract_keywords($title);
+    
+    return array(
+        'product_code' => $sku,
+        'title' => $title,
+        'normalized_title' => $normalized_title,
+        'brand' => $brand ?: self::extract_brand($title),
+        'series' => $series,
+        'size' => $size,
+        'year' => $year,
+        'dimension_info' => array(
+            'ring_gauge' => $dimension_info['ring_gauge'] ?? $seat_row,
+            'length' => $dimension_info['length'] ?? $seat_number,
+            'combined' => $dimensions
+        ),
+        'keywords' => $keywords,
+        'special_edition' => self::extract_special_edition($title),
+        'regional_edition' => self::extract_regional_edition($title),
+        'model_number' => self::extract_model_number($title)
+    );
+}
+
+/**
+ * Process supplier product data for matching
+ * 
+ * @param string $title Product title
+ * @param string $dimensions Product dimensions (ring gauge/length)
+ * @return array Processed product array
+ */
+public static function process_supplier_product($title, $dimensions = '') {
+    self::init();
+    
+    // Normalize the title
+    $normalized_title = self::normalize_text($title);
+    
+    // Extract brand
+    $brand = self::extract_brand($title);
+    
+    // Extract series if brand found
+    $series = '';
+    if ($brand) {
+        $series = self::extract_series($title, $brand);
+    }
+    
+    // Extract size
+    $size = self::extract_size($title);
+    
+    // Parse dimensions
+    $ring_gauge = '';
+    $length = '';
+    if (!empty($dimensions) && strpos($dimensions, '/') !== false) {
+        list($ring_gauge, $length) = explode('/', $dimensions, 2);
+        $ring_gauge = trim($ring_gauge);
+        $length = trim($length);
+    }
+    
+    // Extract dimensions from title if not provided
+    $extracted_dimensions = self::extract_dimensions($title);
+    if (empty($ring_gauge) && !empty($extracted_dimensions['ring_gauge'])) {
+        $ring_gauge = $extracted_dimensions['ring_gauge'];
+    }
+    if (empty($length) && !empty($extracted_dimensions['length'])) {
+        $length = $extracted_dimensions['length'];
+    }
+    
+    // Extract other attributes
+    $year = self::extract_year($title);
+    $special_edition = self::extract_special_edition($title);
+    $regional_edition = self::extract_regional_edition($title);
+    $model_number = self::extract_model_number($title);
+    
+    // Extract keywords
+    $keywords = self::extract_keywords($title);
+    
+    return array(
+        'product_code' => '', // Supplier products don't have our SKU
+        'title' => $title,
+        'normalized_title' => $normalized_title,
+        'brand' => $brand,
+        'series' => $series,
+        'size' => $size,
+        'year' => $year,
+        'dimension_info' => array(
+            'ring_gauge' => $ring_gauge,
+            'length' => $length,
+            'combined' => !empty($ring_gauge) || !empty($length) ? $ring_gauge . '/' . $length : ''
+        ),
+        'keywords' => $keywords,
+        'special_edition' => $special_edition,
+        'regional_edition' => $regional_edition,
+        'model_number' => $model_number
+    );
+}
+
+/**
+ * Extract keywords from a product title
+ * 
+ * @param string $title Product title
+ * @return array Array of keywords
+ */
+public static function extract_keywords($title) {
+    self::init();
+    
+    // Normalize the title
+    $normalized_title = self::normalize_text($title);
+    
+    // Remove common stop words
+    $stop_words = array('the', 'and', 'of', 'in', 'for', 'with', 'by', 'a', 'an');
+    
+    // Split into words
+    $words = preg_split('/[\s\-_]+/u', $normalized_title);
+    
+    // Extract meaningful keywords
+    $keywords = array();
+    
+    foreach ($words as $word) {
+        $word = trim($word);
+        
+        // Skip short words and stop words
+        if (strlen($word) < 3 || in_array($word, $stop_words)) {
+            continue;
+        }
+        
+        // Skip numeric values
+        if (is_numeric($word)) {
+            continue;
+        }
+        
+        $keywords[] = $word;
+    }
+    
+    // Remove duplicates
+    $keywords = array_unique($keywords);
+    
+    return $keywords;
+}
+
+/**
+ * Find best matches between supplier and internal products
+ * 
+ * @param array $supplier_product Processed supplier product
+ * @param array $internal_products Array of processed internal products  
+ * @param int $limit Number of matches to return
+ * @param bool $include_debug Include debugging information
+ * @return array Array of matches with scores
+ */
+public static function find_best_matches($supplier_product, $internal_products, $limit = 5, $include_debug = false) {
+    self::init();
+    
+    $matches = array();
+    
+    foreach ($internal_products as $internal_product) {
+        $score = 0;
+        $match_details = array();
+        $matched_terms = array();
+        
+        // Brand matching (highest weight)
+        if (!empty($supplier_product['brand']) && !empty($internal_product['brand'])) {
+            if (strcasecmp($supplier_product['brand'], $internal_product['brand']) === 0) {
+                $score += 40;
+                $match_details['brand'] = 'exact';
+                $matched_terms[] = 'Brand: ' . $supplier_product['brand'];
+            }
+        }
+        
+        // Series matching
+        if (!empty($supplier_product['series']) && !empty($internal_product['series'])) {
+            if (strcasecmp($supplier_product['series'], $internal_product['series']) === 0) {
+                $score += 30;
+                $match_details['series'] = 'exact';
+                $matched_terms[] = 'Series: ' . $supplier_product['series'];
+            }
+        }
+        
+        // Size matching
+        if (!empty($supplier_product['size']) && !empty($internal_product['size'])) {
+            if (strcasecmp($supplier_product['size'], $internal_product['size']) === 0) {
+                $score += 20;
+                $match_details['size'] = 'exact';
+                $matched_terms[] = 'Size: ' . $supplier_product['size'];
+            }
+        }
+        
+        // Dimension matching
+        $dimension_score = 0;
+        if (!empty($supplier_product['dimension_info']['ring_gauge']) && 
+            !empty($internal_product['dimension_info']['ring_gauge'])) {
+            if ($supplier_product['dimension_info']['ring_gauge'] == $internal_product['dimension_info']['ring_gauge']) {
+                $dimension_score += 15;
+                $matched_terms[] = 'Ring: ' . $supplier_product['dimension_info']['ring_gauge'];
+            }
+        }
+        
+        if (!empty($supplier_product['dimension_info']['length']) && 
+            !empty($internal_product['dimension_info']['length'])) {
+            if ($supplier_product['dimension_info']['length'] == $internal_product['dimension_info']['length']) {
+                $dimension_score += 15;
+                $matched_terms[] = 'Length: ' . $supplier_product['dimension_info']['length'];
+            }
+        }
+        
+        $score += $dimension_score;
+        
+        // Year matching
+        if (!empty($supplier_product['year']) && !empty($internal_product['year'])) {
+            if ($supplier_product['year'] == $internal_product['year']) {
+                $score += 15;
+                $match_details['year'] = 'exact';
+                $matched_terms[] = 'Year: ' . $supplier_product['year'];
+            }
+        }
+        
+        // Special edition matching
+        if (!empty($supplier_product['special_edition']) && !empty($internal_product['special_edition'])) {
+            if (strcasecmp($supplier_product['special_edition'], $internal_product['special_edition']) === 0) {
+                $score += 10;
+                $match_details['special_edition'] = 'exact';
+                $matched_terms[] = 'Special: ' . $supplier_product['special_edition'];
+            }
+        }
+        
+        // Model number matching
+        if (!empty($supplier_product['model_number']) && !empty($internal_product['model_number'])) {
+            if ($supplier_product['model_number'] == $internal_product['model_number']) {
+                $score += 15;
+                $match_details['model'] = 'exact';
+                $matched_terms[] = 'Model: No. ' . $supplier_product['model_number'];
+            }
+        }
+        
+        // Keyword matching
+        $common_keywords = array_intersect($supplier_product['keywords'], $internal_product['keywords']);
+        if (!empty($common_keywords)) {
+            $keyword_score = count($common_keywords) * 2;
+            $score += min($keyword_score, 10); // Cap at 10 points
+            $match_details['keywords'] = $common_keywords;
+            if (count($common_keywords) > 0) {
+                $matched_terms[] = 'Keywords: ' . implode(', ', array_slice($common_keywords, 0, 3));
+            }
+        }
+        
+        // Determine match type based on score
+        $match_type = 'No Match';
+        if ($score >= 80) {
+            $match_type = 'Exact Match';
+        } elseif ($score >= 50) {
+            $match_type = 'Close Match';
+        } elseif ($score >= 30) {
+            $match_type = 'Possible Match';
+        }
+        
+        // Only include matches above a threshold
+        if ($score >= 30) {
+            $match = array(
+                'product' => $internal_product,
+                'score' => $score,
+                'match_type' => $match_type,
+                'match_details' => $match_details,
+                'matched_terms' => $matched_terms
+            );
+            
+            if ($include_debug) {
+                $match['debug'] = array(
+                    'supplier' => $supplier_product,
+                    'internal' => $internal_product,
+                    'scoring' => $match_details
+                );
+            }
+            
+            $matches[] = $match;
+        }
+    }
+    
+    // Sort by score descending
+    usort($matches, function($a, $b) {
+        return $b['score'] - $a['score'];
+    });
+    
+    // Return only the requested number of matches
+    return array_slice($matches, 0, $limit);
+}
+/**
+ * Enhanced debug function to show extraction issues
+ */
+public static function find_best_matches_debug($supplier_product, $internal_products, $limit = 5, $include_debug = true) {
+    self::init();
+    
+    static $products_logged = 0;
+    $should_log = ($products_logged < 10);
+    
+    if ($should_log) {
+        $products_logged++;
+        
+        error_log("=== SUPPLIER PRODUCT #$products_logged ===");
+        error_log("Raw Title: " . $supplier_product['title']);
+        
+        // Show what was extracted
+        error_log("Extracted Data:");
+        error_log("  Brand: " . ($supplier_product['brand'] ?? 'NOT EXTRACTED'));
+        error_log("  Series: " . ($supplier_product['series'] ?? 'NOT EXTRACTED'));
+        error_log("  Size: " . ($supplier_product['size'] ?? 'NOT EXTRACTED'));
+        error_log("  Ring Gauge: " . ($supplier_product['dimension_info']['ring_gauge'] ?? 'NOT EXTRACTED'));
+        error_log("  Length: " . ($supplier_product['dimension_info']['length'] ?? 'NOT EXTRACTED'));
+        error_log("  Year: " . ($supplier_product['year'] ?? 'NOT EXTRACTED'));
+        error_log("  Special Edition: " . ($supplier_product['special_edition'] ?? 'NOT EXTRACTED'));
+        error_log("  Keywords: " . implode(', ', $supplier_product['keywords'] ?? []));
+        
+        error_log("\nChecking against " . count($internal_products) . " internal products...\n");
+        
+        $matches_found = 0;
+        $internal_count = 0;
+        
+        foreach ($internal_products as $internal_product) {
+            $internal_count++;
+            
+            // Show internal product data for first few only
+            if ($internal_count <= 3) {
+                error_log("Internal Product #$internal_count:");
+                error_log("  Title: " . $internal_product['title']);
+                error_log("  Brand: " . ($internal_product['brand'] ?? 'NOT EXTRACTED'));
+                error_log("  Ring/Length: " . ($internal_product['dimension_info']['ring_gauge'] ?? '?') . '/' . ($internal_product['dimension_info']['length'] ?? '?'));
+            }
+            
+            // Calculate score with detailed breakdown
+            $score = 0;
+            $score_details = array();
+            
+            // Brand matching (40 points)
+            if (!empty($supplier_product['brand']) && !empty($internal_product['brand'])) {
+                $s_brand = strtolower(trim($supplier_product['brand']));
+                $i_brand = strtolower(trim($internal_product['brand']));
+                
+                if ($s_brand === $i_brand) {
+                    $score += 40;
+                    $score_details[] = "Brand match: +40";
+                } else if ($internal_count <= 3) {
+                    error_log("  Brand mismatch: '$s_brand' vs '$i_brand'");
+                }
+            } else if ($internal_count <= 3) {
+                $s_has = !empty($supplier_product['brand']) ? 'YES' : 'NO';
+                $i_has = !empty($internal_product['brand']) ? 'YES' : 'NO';
+                error_log("  Brand missing - Supplier has: $s_has, Internal has: $i_has");
+            }
+            
+            // Continue with other scoring...
+            // Show details only for matches or first few products
+            if ($score >= 30 || $internal_count <= 3) {
+                error_log("  Total Score: $score");
+                if (!empty($score_details)) {
+                    error_log("  Matches: " . implode(", ", $score_details));
+                }
+                
+                if ($score >= 30) {
+                    $matches_found++;
+                    error_log("  *** MATCH FOUND! ***");
+                }
+                error_log("  ---");
+            }
+        }
+        
+        error_log("\nSUMMARY:");
+        error_log("Total internal products checked: $internal_count");
+        error_log("Matches found (score >= 30): $matches_found");
+        error_log("=====================================\n");
+    }
+    
+    // Run normal matching logic and return results
+    return self::find_best_matches($supplier_product, $internal_products, $limit, false);
+}
+	
+}
