@@ -1,0 +1,277 @@
+<?php
+/**
+ * Cigar Mappings Data File
+ * Contains all brand mappings, size mappings, special editions, and other reference data
+ * This file should be included/required by the main mapping logic file
+ */
+
+return [
+    'brands' => [
+        'cuban' => [
+            'cohiba' => ['高希霸', '科伊巴', '科希巴', '哥希霸', '柯希巴', '可希巴', '寇希巴', 'cohiba'],
+            'montecristo' => ['蒙特', '蒙特克里斯托', '蒙特克里斯多', '蒙特西托', '蒙德克里斯多', '蒙特利斯托', '蒙克', '蒙特克里托', '蒙特利多', '蒙泰克里斯托', 'montecristo', 'monte'],
+            'romeo y julieta' => ['罗密欧', '罗密欧与朱丽叶', '罗密欧朱丽叶', '罗密欧与朱丽叶', '罗密欧与朱莉叶', '罗米欧与朱丽叶', '罗密欧茱丽叶', '罗密欧与茱丽叶', '罗密欧茱莉叶', '罗密欧与茱莉叶', 'romeo y julieta', 'romeo and juliet', 'ryj', 'romeo'],
+            'partagas' => ['帕特加斯', '百得加斯', '巴塔加斯', '百德加斯', '帕塔加斯', '巴特加斯', '帕塔嘉', '百得嘉斯', '帕塔嘉斯', 'partagas'],
+            'hoyo de monterrey' => ['好友', '蒙特雷', '和悦', '和悦蒙特雷', '和悦蒙特利', '豪友', '豪友得蒙特雷', '豪友蒙特雷', '豪由得蒙特雷', '好友得蒙特雷', '好友德蒙特雷', 'hoyo de monterrey', 'hoyo', 'hdm'],
+            'h.upmann' => ['乌普曼', '维特曼', '胡曼', '乌普曼', '乌普门', '乌普慢', '乌普慢', '赫伯特·乌普曼', '赫伯特乌普曼', '乌普曼', 'h.upmann', 'upmann', 'h upmann'],
+            'bolivar' => ['玻利瓦尔', '玻利瓦', '波利瓦尔', '波利瓦', '玻利维亚', '玻利瓦', '玻力瓦尔', 'bolivar'],
+            'trinidad' => ['特立尼达', '特立尼达', '特立尼达', '特立达', '特立尼达', '特利尼达', '特丽尼达', 'trinidad'],
+            'san cristobal de la habana' => ['圣克里斯托瓦尔', '圣科里斯多瓦尔', '圣克里斯托瓦', '圣克里斯托发尔', '圣科里斯托发尔', '圣科里斯托弗', '圣克里斯多发', '圣克里斯托佛', '圣科里斯多佛', 'san cristobal de la habana', 'san cristobal', 'sch'],
+            'diplomaticos' => ['外交官', '迪普洛马特', '迪普洛马科斯', '迪普洛玛科斯', '迪普洛马蒂克', '迪普洛玛蒂克', '外交官', 'diplomaticos', 'diplo'],
+            'juan lopez' => ['胡安·洛佩兹', '胡安洛佩兹', '胡安·罗佩兹', '胡安罗佩兹', '胡安·洛佩斯', '胡安洛佩斯', '胡安·罗佩斯', '胡安罗佩斯', '胡安·洛培兹', '胡安洛培兹', 'juan lopez', 'jl'],
+            'por larrañaga' => ['普罗拉那加', '普罗拉尼亚加', '普罗拉加', '普拉拉加', '普拉拉尼亚加', '普拉加', '普罗拉加纳', '普罗拉纳加', 'por larranaga', 'pl'],
+            'ramon allones' => ['雷蒙·艾隆', '雷蒙艾隆', '雷蒙·阿隆', '雷蒙阿隆', '雷蒙·阿隆内斯', '雷蒙阿隆内斯', '雷蒙·艾旺', '雷蒙艾旺', '雷蒙·艾隆尼', '雷蒙艾隆尼', 'ramon allones', 'ra'],
+            'quai d\'orsay' => ['岸岬', '凯多塞', '岸多塞', '奥塞码头', '多尔赛', '多尔塞', '多赛', '多塞', '码头多塞', '码头多尔塞', 'quai d\'orsay', 'quai d orsay', 'qdo'],
+            'fonseca' => ['丰塞卡', '风塞卡', '丰赛卡', '风赛卡', '枫塞卡', '枫赛卡', '方塞卡', '丰塞克', '风塞克', '方赛卡', 'fonseca'],
+            'el rey del mundo' => ['雷恩', '雷伊', '雷世', '世界王', '世界之王', '国王世界', '雷伊德尔蒙多', '雷恩德尔蒙多', '雷伊德蒙多', '雷恩德蒙多', 'el rey del mundo', 'erdm', 'el rey', 'rey del mundo'],
+            'rafael gonzalez' => ['拉斐尔·冈萨雷斯', '拉斐尔冈萨雷斯', '拉菲尔·冈萨雷斯', '拉菲尔冈萨雷斯', '拉斐尔·贡萨雷斯', '拉斐尔贡萨雷斯', '拉菲尔·贡萨雷斯', '拉菲尔贡萨雷斯', '拉法尔·冈萨雷斯', '拉法尔冈萨雷斯', 'rafael gonzalez', 'rg'],
+            'sancho panza' => ['桑丘·潘沙', '桑丘潘沙', '桑丘·潘札', '桑丘潘札', '桑秋·潘沙', '桑秋潘沙', '桑秋·潘札', '桑秋潘札', '桑丘·庞沙', '桑丘庞沙', 'sancho panza', 'sp', 'sancho'],
+            'vegafina' => ['维加菲娜', '维加菲纳', '威加菲娜', '威加菲纳', '韦加菲纳', '韦加斐纳', '维加斐娜', '薇加菲娜', 'vegafina'],
+            'jose l. piedra' => ['何塞', '乔塞', '何塞·皮德拉', '何塞皮德拉', '乔塞·皮德拉', '乔塞皮德拉', '何塞·彼德拉', '何塞彼德拉', '乔塞·彼德拉', '乔塞彼德拉', '何塞·皮埃德拉', '何塞皮埃德拉', 'jose l. piedra', 'jose l piedra', 'jlp', 'piedra'],
+            'la gloria cubana' => ['古巴荣耀', '拉格洛利亚古巴纳', '拉格罗利亚古巴纳', '拉格洛里亚古巴纳', '拉荣耀古巴', '古巴荣耀', '拉格洛利亚', '拉格罗利亚', '拉格洛里亚', 'la gloria cubana', 'lgc', 'la gloria'],
+            'la flor de cano' => ['卡诺之花', '卡诺花', '拉福罗德卡诺', '拉芙罗德卡诺', '拉弗洛尔德卡诺', '拉弗洛尔德卡诺', '拉福罗', '拉芙罗', '拉弗洛尔', 'la flor de cano', 'lfdc', 'flor de cano'],
+            'quintero' => ['昆特罗', '坤特罗', '昆德罗', '宽特罗', '昆特洛', '坤特洛', '昆德洛', '宽特洛', '金特罗', '金特洛', 'quintero'],
+            'punch' => ['潘趣', '朋趣', '潘奇', '朋奇', '庞趣', '庞奇', '邦趣', '邦奇', '潘契', '朋契', 'punch'],
+            'saint luis rey' => ['圣路易斯雷伊', '圣路易斯·雷伊', '圣路易斯·雷', '圣路易斯雷', '圣路易·雷伊', '圣路易雷伊', '圣路易·雷', '圣路易雷', '圣路易斯·雷恩', '圣路易斯雷恩', 'saint luis rey', 'slr', 'st. luis rey'],
+            'vegueros' => ['维格罗斯', '韦格罗斯', '威格罗斯', '维盖罗斯', '韦盖罗斯', '威盖罗斯', '维格洛斯', '韦格洛斯', '威格洛斯', 'vegueros'],
+            'guantanamera' => ['关塔那美拉', '关塔纳美拉', '关达那美拉', '关达纳美拉', '瓜塔那美拉', '瓜塔纳美拉', '瓜达那美拉', '瓜达纳美拉', '关塔那美罗', '关塔纳美罗', 'guantanamera']
+        ],
+        'non_cuban' => [
+            'padron' => ['帕德龙', '帕德隆', '帕德朗', '帕特龙', '帕特隆', '帕德罗', '帕特罗', '帕德隆', '帕多隆', '帕多龙', '巴德龙', '巴德隆', '巴德朗', '巴特龙', '帕迪龙', '帕迪隆', 'padron', 'padrón'],
+            'arturo fuente' => ['阿图罗·富恩特', '阿图罗富恩特', '阿图罗·符恩特', '阿图罗符恩特', '富恩特', '符恩特', '阿图罗', '阿杜罗·富恩特', '阿杜罗富恩特', '富恩特家族', '阿杜罗富恩特', '亚图罗富恩特', '亚图罗·富恩特', '富安特', '福恩特', '福安特', '富恩德', '富恩蒂', '阿图罗福恩特', 'arturo fuente', 'fuente'],
+            'davidoff' => ['大卫杜夫', '大卫·杜夫', '达维杜夫', '达维·杜夫', '大卫多夫', '大卫·多夫', '达维多夫', '达维·多夫', '大卫杜夫', '达维多夫', 'davidoff'],
+            'oliva' => ['奥利瓦', '奥里瓦', '奥利华', '奥里华', '欧利瓦', '欧里瓦', '欧利华', '欧里华', '奥立瓦', '奥立华', 'oliva'],
+            'rocky patel' => ['洛基·帕特尔', '洛基帕特尔', '劳基·帕特尔', '劳基帕特尔', '洛奇·帕特尔', '洛奇帕特尔', '罗基·帕特尔', '罗基帕特尔', '洛基·帕特', '洛基帕特', 'rocky patel', 'rp'],
+            'drew estate' => ['德鲁·庄园', '德鲁庄园', '德鲁·产业', '德鲁产业', '德鲁·房产', '德鲁房产', '德鲁·地产', '德鲁地产', '得鲁·庄园', '得鲁庄园', 'drew estate'],
+            'ashton' => ['雅顿', '阿什顿', '艾什顿', '阿诗顿', '阿仕顿', '阿斯顿', '雅斯顿', '艾斯顿', '艾仕顿', '艾诗顿', 'ashton'],
+            'my father' => ['我的父亲', '我父亲', '麦法瑟', '麦法', '买法', '买法瑟', '麦法世', '麦法赛', '麦法瑟', '迈法瑟', 'my father', 'mf'],
+            'aj fernandez' => ['aj费尔南德斯', 'aj·费尔南德斯', 'aj费南德斯', 'aj·费南德斯', 'aj费尔兰德斯', 'aj·费尔兰德斯', 'aj费尔南德', 'aj·费尔南德', 'aj·菲尔南德斯', 'aj菲尔南德斯', 'aj fernandez', 'ajf'],
+            'macanudo' => ['玛卡努多', '玛卡鲁多', '马卡努多', '马卡鲁多', '玛卡诺多', '玛卡洛多', '马卡诺多', '马卡洛多', '玛卡努铎', '玛卡鲁铎', 'macanudo', 'mac'],
+            'cao' => ['cao', 'c.a.o.', 'c.a.o', 'c a o', 'cao雪茄'],
+            'la aurora' => ['拉奥罗拉', '拉·奥罗拉', '拉奥罗拉', '拉·奥洛拉', '拉奥洛拉', '拉·欧罗拉', '拉欧罗拉', '拉·欧洛拉', '拉欧洛拉', '劳罗拉', 'la aurora'],
+            'la flor dominicana' => ['拉弗罗多米尼加纳', '拉·弗罗多米尼加纳', '拉弗罗多米尼加', '拉·弗罗多米尼加', '拉弗洛尔多米尼加纳', '拉·弗洛尔多米尼加纳', '拉弗洛尔多米尼加', '拉·弗洛尔多米尼加', '拉菲罗多米尼加纳', '拉·菲罗多米尼加纳', 'la flor dominicana', 'lfd'],
+            'acid' => ['酸雪茄', '酸味雪茄', '阿希德', '阿西德', '爱西得', '爱希德', '爱希的', '爱西的', '爱西迪', '爱希迪', 'acid'],
+            'camacho' => ['卡马乔', '卡玛乔', '卡马丘', '卡玛丘', '卡马的', '卡玛的', '卡马考', '卡玛考', '喀马乔', '喀玛乔', 'camacho'],
+            'plasencia' => ['普拉森西亚', '普拉森西娅', '普拉森夏', '普拉森霞', '普莱森西亚', '普莱森西娅', '普莱森夏', '普莱森霞', '普拉先茜亚', '普拉先茜娅', 'plasencia']
+        ]
+    ],
+    'series' => [
+        'cohiba' => [
+            'siglo' => ['世纪', '西格洛', 'siglo'],
+            'behike' => ['贝希克', '贝伊克', 'behike', 'bhk'],
+            'linea 1492' => ['1492系列', '1492', 'linea 1492'],
+            'linea clasica' => ['经典系列', '古典系列', '传统系列', 'linea clasica', 'classic'],
+            'maduro 5' => ['马杜罗5', '马杜罗5号', '玛度罗5', '玛度罗5号', 'maduro 5'],
+            'talisman' => ['塔利斯曼', '塔利斯蔓', '护身符', '魔符', 'talisman'],
+            'panatela' => ['潘纳特拉', '帕纳特拉', '潘纳特拉', '帕纳泰拉', 'panatela'],
+            'esplendido' => ['伟大', '辉煌', '灿烂', '杰出', 'esplendido'],
+            'robusto' => ['罗布图', '罗布斯托', 'robusto'],
+            'exquisito' => ['精致', '优雅', '精美', '精巧', 'exquisito'],
+            'coronas especiales' => ['特殊皇冠', '特别皇冠', '特殊科罗纳', '特别科罗纳', 'coronas especiales'],
+            'medio siglo' => ['半个世纪', '半世纪', 'medio siglo']
+        ],
+        'montecristo' => [
+            'linea 1935' => ['1935系列', '1935', 'linea 1935'],
+            'edmundo' => ['爱德蒙多', '埃德蒙多', '艾德蒙多', '埃德蒙', '爱德蒙', '艾德蒙', 'edmundo'],
+            'open' => ['开放', '敞开', 'open'],
+            'linea clasica' => ['经典系列', '古典系列', '传统系列', 'linea clasica', 'classic'],
+            'double edmundo' => ['双爱德蒙多', '双埃德蒙多', '双艾德蒙多', '双埃德蒙', '双爱德蒙', '双艾德蒙', 'double edmundo'],
+            'petit edmundo' => ['小爱德蒙多', '小埃德蒙多', '小艾德蒙多', '小埃德蒙', '小爱德蒙', '小艾德蒙', 'petit edmundo'],
+            'eagle' => ['鹰', '雄鹰', 'eagle'],
+            'junior' => ['少年', '初级', 'junior'],
+            'medio siglo' => ['半个世纪', '半世纪', 'medio siglo']
+        ]
+    ],
+    'sizes' => [
+        'robusto' => ['罗布图', '罗伯图', '罗拔图', '罗布斯托', '罗布托', '罗布', '劳伯图', '罗布图斯', '罗伯图斯', '罗普图'],
+        'toro' => ['托罗', '公牛', '多罗', '托洛', '多洛', '托鲁', '多鲁', '特罗', '特洛', '特鲁'],
+        'corona' => ['皇冠', '科罗纳', '柯罗娜', '可罗那', '科洛娜', '科罗纳', '冠军', '冠冕', '科若娜', '科罗纳'],
+        'churchill' => ['丘吉尔', '邱吉尔', '丘契尔', '邱契尔', '丘尔基', '邱尔基', '丘尔奇', '邱尔奇', '丘吉鲁', '邱吉鲁'],
+        'torpedo' => ['鱼雷', '托皮多', '托培多', '托比多', '托佩多', '拓比多', '拓皮多', '拓培多', '托尔皮多', '托尔培多'],
+        'petit corona' => ['小皇冠', '迷你皇冠', '小科罗纳', '迷你科罗纳', '小冠军', '迷你冠军', '小冠冕', '迷你冠冕', '小科若娜', '迷你科若娜'],
+        'lancero' => ['枪骑兵', '长矛骑兵', '兰塞罗', '兰色罗', '蓝色罗', '兰瑟罗', '蓝瑟罗', '南瑟罗', '兰塞洛', '兰色洛'],
+        'lonsdale' => ['朗斯代尔', '隆兹代尔', '隆斯代尔', '朗兹代尔', '隆兹戴尔', '隆斯戴尔', '朗斯戴尔', '朗兹戴尔', '朗斯代', '隆斯代'],
+        'belicoso' => ['贝利科索', '百里可索', '贝里可索', '百利科索', '贝利科斯', '百里可斯', '贝里可斯', '百利科斯', '贝利可索', '百里科索'],
+        'double corona' => ['双皇冠', '双科罗纳', '双柯罗娜', '双可罗那', '双科洛娜', '双冠军', '双冠冕', '双科若娜', '大皇冠', '大科罗纳'],
+        'petit robusto' => ['小罗布图', '小罗伯图', '小罗拔图', '小罗布斯托', '小罗布托', '小劳伯图', '小罗布图斯', '小罗伯图斯', '迷你罗布图', '迷你罗伯图'],
+        'gordo' => ['戈尔多', '高尔多', '格尔多', '哥尔多', '戈多', '高多', '格多', '哥多', '胖子', '大胖'],
+        'panatela' => ['帕纳特拉', '帕娜特拉', '帕拿特拉', '帕纳特拉', '帕娜特拉', '帕拿特拉', '帕纳特赖', '帕娜特赖', '帕拿特赖', '潘内特拉'],
+        'perfecto' => ['完美', '珀菲克特', '珀费克特', '泼菲克特', '泼费克特', '帕菲克特', '帕费克特', '普菲克特', '普费克特', '泼非克特'],
+        'gran corona' => ['大皇冠', '巨皇冠', '大科罗纳', '巨科罗纳', '大柯罗娜', '巨柯罗娜', '大可罗那', '巨可罗那', '大科洛娜', '巨科洛娜'],
+        'petit torpedo' => ['小鱼雷', '迷你鱼雷', '小托皮多', '迷你托皮多', '小托培多', '迷你托培多', '小托比多', '迷你托比多', '小托佩多', '迷你托佩多'],
+        'culebra' => ['库莱布拉', '库勒布拉', '库雷布拉', '库佩布拉', '库莱布拉', '库勒布拉', '库雷布拉', '库佩布拉', '蛇形', '三蛇'],
+        'gran toro' => ['大托罗', '巨托罗', '大公牛', '巨公牛', '大多罗', '巨多罗', '大托洛', '巨托洛', '大多洛', '巨多洛'],
+        'double toro' => ['双托罗', '双公牛', '双多罗', '双托洛', '双多洛', '双托鲁', '双多鲁', '双特罗', '双特洛', '双特鲁'],
+        'diadema' => ['迪亚德玛', '迪阿德玛', '迪亚德马', '迪阿德马', '戴亚德玛', '戴阿德玛', '戴亚德马', '戴阿德马', '皇冠', '皇后']
+    ],
+    'special_editions' => [
+        'limited edition' => ['限量版', 'limited edition', 'le'],
+        'reserva' => ['珍藏', 'reserva'],
+        'gran reserva' => ['特级珍藏', '大珍藏', 'gran reserva'],
+        'edicion limitada' => ['限量版', 'edicion limitada', 'el'],
+        'edicion regional' => ['区域版', 'regional edition', 'edicion regional', 're'],
+        'book' => ['书', '册', 'book'],
+        'travel retail' => ['旅游零售版', '免税店版', '旅行版', 'travel retail'],
+        'coleccion habanos' => ['哈瓦那珍藏版', '哈瓦那收藏版', 'coleccion habanos', 'ch'],
+        'casa del habano' => ['哈瓦那雪茄屋', '哈瓦那之家', 'casa del habano', 'la casa del habano', 'lcdh']
+    ],
+    'regional_editions' => [
+        'asia pacific' => ['亚太', 'asia pacific'],
+        'uk' => ['英国', 'uk', 'united kingdom'],
+        'spain' => ['西班牙', 'spain'],
+        'france' => ['法国', 'france'],
+        'switzerland' => ['瑞士', 'switzerland'],
+        'germany' => ['德国', 'germany'],
+        'italy' => ['意大利', 'italy'],
+        'canada' => ['加拿大', 'canada'],
+        'china' => ['中国', 'china'],
+        'hong kong' => ['香港', 'hong kong', 'hk'],
+        'benelux' => ['比荷卢', '比利时-荷兰-卢森堡', 'benelux'],
+        'middle east' => ['中东', 'middle east'],
+        'caribbean' => ['加勒比', 'caribbean'],
+        'cyprus' => ['塞浦路斯', 'cyprus']
+    ],
+    'dimension_patterns' => [
+        // Ring gauge patterns
+        'ring_gauge' => [
+            '/(\d+)\s*[xX×]\s*(\d+)/',            // 50 x 124
+            '/(\d+(?:\.\d+)?)\s*环径/',             // 50环径
+            '/环径\s*(\d+(?:\.\d+)?)/',             // 环径50
+            '/ring\s*gauge\s*(\d+(?:\.\d+)?)/',    // ring gauge 50
+            '/(\d+(?:\.\d+)?)\s*rg/',              // 50 rg
+            '/rg\s*(\d+(?:\.\d+)?)/',              // rg 50
+            '/gauge\s*(\d+(?:\.\d+)?)/',           // gauge 50
+            '/口径\s*(\d+(?:\.\d+)?)/',             // 口径50
+            '/(\d+(?:\.\d+)?)\s*口径/'              // 50口径
+        ],
+        
+        // Length patterns
+        'length' => [
+            '/(\d+)\s*[xX×]\s*(\d+)/',            // 50 x 124
+            '/长度\s*(\d+(?:\.\d+)?)/',             // 长度124
+            '/(\d+(?:\.\d+)?)\s*mm/',              // 124 mm
+            '/(\d+(?:\.\d+)?)\s*毫米/',             // 124 毫米
+            '/长\s*(\d+(?:\.\d+)?)/',              // 长124
+            '/(\d+(?:\.\d+)?)\s*长/',              // 124长
+            '/length\s*(\d+(?:\.\d+)?)/',          // length 124
+            '/(\d+(?:\.\d+)?)\s*length/'           // 124 length
+        ]
+    ],
+    'translation_mapping' => [
+        // Common translations for cigar-related terms
+        'series' => ['系列', '款', '款式', '种类', 'series'],
+        'limited' => ['限量', '限定', '限制', 'limited'],
+        'edition' => ['版', '版本', '版式', 'edition'],
+        'special' => ['特殊', '特别', '特制', 'special'],
+        'anniversary' => ['周年', '纪念', '周年纪念', 'anniversary'],
+        'box' => ['盒', '盒子', '木盒', '包装盒', 'box'],
+        'pack' => ['包', '包装', '装', 'pack'],
+        'aged' => ['陈年', '老', '年份', 'aged'],
+        'vintage' => ['年份', '老年', '老式', '古董', 'vintage'],
+        'collection' => ['收藏', '收藏品', '珍藏', 'collection'],
+        'release' => ['发行', '发布', '推出', 'release'],
+        'production' => ['生产', '制造', '产量', 'production'],
+        'gift' => ['礼品', '礼物', '赠品', 'gift'],
+        'travel' => ['旅行', '旅游', '出行', 'travel'],
+        'retail' => ['零售', '销售', 'retail'],
+        'exclusive' => ['专属', '独家', '专门', 'exclusive']
+    ],
+    'ignored_terms' => [
+        // Terms to ignore when processing product titles
+        'authentic', 'genuine', 'original', 'official', 'real', 'true', 
+        '正品', '原装', '真品', '官方', '原厂', '真正',
+        'buy', 'sale', 'discount', 'offer', 'promotion', 'deal',
+        '购买', '销售', '折扣', '特价', '促销', '交易',
+        'shipping', 'delivery', 'express', 'fast', 'free',
+        '运输', '送货', '快递', '快速', '免费',
+        'best', 'top', 'premium', 'quality', 'high-end', 'luxury',
+        '最佳', '顶级', '优质', '高质量', '高端', '奢侈',
+        'new', 'latest', 'hot', 'popular', 'trending',
+        '新', '最新', '热', '流行', '趋势'
+    ],
+    'model_patterns' => [
+        // Model number patterns
+        '/[nN][oO]\.?\s*(\d+)/',              // No. 2, No 2, no.2, no 2
+        '/[nN](?:um|o|°)(?:ero|\.)?\.?\s*(\d+)/',  // Numero 2, No. 2, N°2
+        '/(?:号|号码|型号)\s*(\d+)/',              // 号2, 号码2, 型号2
+        '/(\d+)\s*(?:号|号码|型号)/',              // 2号, 2号码, 2型号
+        '/No\s*(\d+)/'                        // No 2 (explicit No)
+    ],
+    'year_patterns' => [
+        // Year patterns
+        '/(\d{4})年?版?/',                      // 2019, 2019年, 2019版
+        '/(?:年份|生产年份|出厂年份)\s*(\d{4})/',     // 年份2019, 生产年份2019
+        '/(?:year|yr)\.?\s*(\d{4})/',          // year 2019, yr 2019, yr.2019
+        '/(\d{4})\s*(?:year|yr)/'              // 2019 year, 2019 yr
+    ],
+    'regional_patterns' => [
+        // Regional edition patterns
+        '/(?:regional|region|regional edition|regional release).*?(\w+)/',  // regional edition asia pacific
+        '/(?:区域版|地区版).*?(\w+)/',                                      // 区域版亚太
+        '/(\w+).*?(?:regional|region|regional edition|regional release)/',  // asia pacific regional edition
+        '/(\w+).*?(?:区域版|地区版)/'                                       // 亚太区域版
+    ],
+    'packaging' => [
+        'box' => ['盒', '木盒', '包装盒', '盒装', '礼盒', '木箱', 'box', 'wooden box', 'cabinet'],
+        'bundle' => ['捆', '捆装', '束', 'bundle', 'bundles'],
+        'pack' => ['包', '小包', '包装', 'pack', 'packs'],
+        'tin' => ['罐', '锡罐', '铁罐', '金属罐', 'tin', 'metal tin', 'tube'],
+        'single' => ['单支', '单根', '单条', '单个', 'single', 'singles'],
+        'jar' => ['罐', '瓶', '玻璃罐', '陶瓷罐', 'jar', 'glass jar', 'ceramic jar'],
+        'sampler' => ['品鉴装', '尝试装', '混合装', '组合装', 'sampler', 'assortment', 'selection'],
+        'gift set' => ['礼品套装', '礼盒套装', '礼物套装', 'gift set', 'gift pack', 'gift box'],
+        'travel case' => ['旅行盒', '旅行套装', '旅行装', 'travel case', 'travel pack', 'travel humidor']
+    ],
+    'zodiac_years' => [
+        'rat' => ['鼠', '鼠年', '子鼠', 'rat'],
+        'ox' => ['牛', '牛年', '丑牛', 'ox', 'bull'],
+        'tiger' => ['虎', '虎年', '寅虎', 'tiger'],
+        'rabbit' => ['兔', '兔年', '卯兔', 'rabbit', 'hare'],
+        'dragon' => ['龙', '龙年', '辰龙', 'dragon'],
+        'snake' => ['蛇', '蛇年', '巳蛇', 'snake', 'serpent'],
+        'horse' => ['马', '马年', '午马', 'horse'],
+        'goat' => ['羊', '羊年', '未羊', 'goat', 'sheep', 'ram'],
+        'monkey' => ['猴', '猴年', '申猴', 'monkey'],
+        'rooster' => ['鸡', '鸡年', '酉鸡', 'rooster', 'cock', 'chicken'],
+        'dog' => ['狗', '狗年', '戌狗', 'dog'],
+        'pig' => ['猪', '猪年', '亥猪', 'pig', 'boar']
+    ],
+    'brand_aliases' => [
+        // Common aliases and abbreviations for brands
+        'cohibas' => 'cohiba',
+        'monte' => 'montecristo',
+        'montecristos' => 'montecristo',
+        'upmanns' => 'h.upmann',
+        'uppmann' => 'h.upmann',
+        'punch cigars' => 'punch',
+        'romeo' => 'romeo y julieta',
+        'romeos' => 'romeo y julieta',
+        'ryj' => 'romeo y julieta',
+        'parti' => 'partagas',
+        'partagases' => 'partagas',
+        'hdm' => 'hoyo de monterrey',
+        'hoyo' => 'hoyo de monterrey',
+        'hoyos' => 'hoyo de monterrey',
+        'boli' => 'bolivar',
+        'bolivares' => 'bolivar',
+        'trinidads' => 'trinidad',
+        'padrons' => 'padron',
+        'fuentes' => 'arturo fuente',
+        'af' => 'arturo fuente',
+        'olivas' => 'oliva',
+        'davidoffs' => 'davidoff',
+        'rp' => 'rocky patel',
+        'rocky' => 'rocky patel',
+        'de' => 'drew estate',
+        'djarum' => 'djarum'
+    ],
+    'distributor_mappings' => [
+        'pacific cigar' => ['太平洋雪茄', '太平洋', 'pacific cigar', 'pacific'],
+        'habanos sa' => ['哈瓦那雪茄公司', '哈瓦那', 'habanos sa', 'habanos', 'hsa'],
+        'ihw' => ['infifon hong kong', 'ihw'],
+        'cws' => ['中华雪茄', '华子', 'china cigar', 'cws'],
+        'top cigars' => ['顶级雪茄', 'top cigars', 'tc'],
+        'phoenicia' => ['腓尼基', 'phoenicia'],
+        'intertabak' => ['国际烟草', 'intertabak', 'itb']
+    ]
+];
